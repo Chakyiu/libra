@@ -1,0 +1,11 @@
+/target
+/data
+.env
+*.db
+*.db-shm
+*.db-wal
+web/node_modules
+web/.next
+web/out
+web/next-env.d.ts
+.DS_Store

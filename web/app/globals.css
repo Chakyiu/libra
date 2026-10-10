@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+body {
+  @apply bg-bg text-ink;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.prose-answer { @apply text-[15px] leading-7; }
+.prose-answer h1, .prose-answer h2, .prose-answer h3 { @apply font-semibold mt-6 mb-2; }
+.prose-answer h2 { @apply text-lg; }
+.prose-answer h3 { @apply text-base; }
+.prose-answer p { @apply my-3; }
+.prose-answer ul { @apply list-disc pl-5 my-3 space-y-1; }
+.prose-answer ol { @apply list-decimal pl-5 my-3 space-y-1; }
+.prose-answer a { @apply text-accent underline; }
+.prose-answer code { @apply bg-panel px-1 rounded text-[13px]; }
+.prose-answer pre { @apply bg-panel border border-edge rounded p-3 overflow-x-auto my-3; }
+.prose-answer pre code { @apply bg-transparent p-0; }
+.prose-answer blockquote { @apply border-l-2 border-edge pl-3 text-mute my-3; }
+.prose-answer sup a { @apply no-underline text-accent; }
+
+input, textarea, select {
+  @apply bg-panel border border-edge rounded px-3 py-2 text-sm outline-none focus:border-accent;
+}
+button { @apply transition-colors; }

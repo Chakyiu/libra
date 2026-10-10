@@ -1,0 +1,42 @@
+services:
+  vane:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      VANE_DATA_DIR: /data
+      DATABASE_URL: /data/vane.db
+      REDIS_URL: redis://redis:6379
+      SEARXNG_API_URL: http://searxng:8080
+      RUST_LOG: info
+      # OPENAI_API_KEY: sk-…
+      # ANTHROPIC_API_KEY: …
+      # GEMINI_API_KEY: …
+    volumes:
+      - vane-data:/data
+    depends_on:
+      - redis
+      - searxng
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    volumes:
+      - ./docker/searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888/
+    ports:
+      - "8888:8080"
+    restart: unless-stopped
+
+volumes:
+  vane-data:
+  redis-data:
