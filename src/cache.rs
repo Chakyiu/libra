@@ -51,7 +51,7 @@ impl Cache {
             }
         };
         let ping: redis::RedisResult<String> = redis::cmd("PING")
-            .arg("vane")
+            .arg("libra")
             .query_async(&mut cm)
             .await;
         match ping {

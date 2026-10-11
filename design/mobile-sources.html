@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Libra — mobile sources sheet</title>
+<link rel="stylesheet" href="libra.css">
+<script>try{var t=localStorage.getItem('libra:theme')||'light';document.documentElement.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;}catch(e){}</script>
+<style>
+  body {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 32px 20px 40px;
+    background: var(--sunken);
+  }
+
+  .stage-note { text-align: center; max-width: 42ch; }
+  .stage-note h1 {
+    font-family: var(--font-display);
+    font-size: 21px;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    margin: 8px 0 6px;
+  }
+  .stage-note p { font-size: 13px; line-height: 1.55; color: var(--muted); margin: 0; }
+
+  /* ── device ── */
+  .device {
+    width: 390px;
+    height: 844px;
+    max-height: calc(100dvh - 190px);
+    flex: none;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+    border: 1px solid color-mix(in oklch, var(--border) 40%, var(--fg) 25%);
+    border-radius: 34px;
+    display: flex;
+    flex-direction: column;
+    isolation: isolate;
+  }
+
+  .ios-bar {
+    flex: none;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 26px 0;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
+    color: var(--fg);
+  }
+  .ios-bar svg { display: block; color: var(--fg); }
+
+  .m-head {
+    flex: none;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .m-head__title {
+    font-family: var(--font-display);
+    font-size: 14.5px;
+    font-weight: 500;
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .m-scroll { flex: 1; overflow-y: auto; padding: 20px 20px 120px; min-height: 0; }
+
+  .m-scroll h1 {
+    font-family: var(--font-display);
+    font-size: 23px;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+    margin: 8px 0 10px;
+    text-wrap: balance;
+  }
+
+  .m-scroll .answer { font-size: 17px; line-height: 1.6; }
+  .m-scroll .answer > p { max-width: none; }
+  .m-scroll .answer h2 { margin-top: 1.6em; }
+
+  .m-followups { margin-top: 1.8em; border-top: 1px solid var(--border); padding-top: 14px; }
+  .m-followups ul { list-style: none; margin: 8px 0 0; padding: 0; }
+  .m-followups a {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--fg);
+    text-decoration: none;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+    min-height: 44px;
+  }
+  .m-followups a::before { content: '→ '; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+
+  /* ── bottom composer ── */
+  .m-composer {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    z-index: 2;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 10px 14px 22px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .m-composer input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: 15px;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-color: color-mix(in oklch, var(--border) 50%, var(--fg) 18%);
+    border-radius: 4px;
+    padding: 0 12px;
+    height: 44px;
+  }
+  .m-composer input:focus { outline: none; border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
+  .m-composer .btn { height: 44px; min-height: 44px; }
+
+  /* the pill that summons the rail */
+  .sources-pill {
+    position: absolute;
+    left: 50%;
+    bottom: 88px;
+    transform: translateX(-50%);
+    z-index: 3;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 550;
+    letter-spacing: 0.02em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 15px;
+    border-radius: 18px;
+    color: var(--bg);
+    background: var(--fg);
+    border: 0;
+    box-shadow: 0 2px 10px color-mix(in oklch, var(--fg) 22%, transparent);
+    cursor: pointer;
+    transition: opacity 180ms, transform 180ms;
+  }
+  .sources-pill[hidden] { display: none; }
+  .sources-pill b { font-family: var(--font-mono); font-size: 11px; font-weight: 400; opacity: 0.75; }
+
+  /* ── sheet ── */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    background: color-mix(in oklch, var(--fg) 26%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 220ms;
+  }
+  .scrim.is-on { opacity: 1; pointer-events: auto; }
+
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    z-index: 5;
+    height: calc(100% - 52px);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -6px 26px color-mix(in oklch, var(--fg) 14%, transparent);
+    transition: transform 280ms cubic-bezier(0.22, 0.8, 0.3, 1);
+    touch-action: none;
+  }
+  .sheet.is-dragging { transition: none; }
+
+  .sheet__grab { padding: 9px 0 4px; display: flex; justify-content: center; cursor: grab; flex: none; }
+  .sheet__grab i { width: 34px; height: 4px; border-radius: 2px; background: var(--border); display: block; }
+
+  .sheet__head {
+    flex: none;
+    padding: 4px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .sheet__headline { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+
+  .sheet .rail__scroll { overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; padding-bottom: 28px; }
+  .sheet .source { background: var(--surface); }
+  .sheet .source:hover { background: var(--sunken); }
+  .sheet .source.is-lit { background: var(--sunken); }
+
+  @media (max-width: 460px) {
+    body { padding: 0; gap: 0; background: var(--bg); }
+    .stage-note { display: none; }
+    .device {
+      width: 100%;
+      height: 100dvh;
+      max-height: none;
+      border: 0;
+      border-radius: 0;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage-note" data-od-id="stage-note">
+  <span class="kicker">Libra · mobile</span>
+  <h1>Sources become a sheet, not a second page</h1>
+  <p>Drag the handle, tap a numbered citation in the answer, or use the pill. The answer keeps its place underneath.</p>
+</div>
+
+<div class="device" data-od-id="device-frame">
+
+  <div class="ios-bar" aria-hidden="true">
+    <span>9:41</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="0.7"/><rect x="4.3" y="5" width="3" height="6" rx="0.7"/><rect x="8.6" y="2.6" width="3" height="8.4" rx="0.7"/><rect x="12.9" y="0" width="3" height="11" rx="0.7" opacity="0.35"/></svg>
+      <svg width="23" height="11" viewBox="0 0 23 11" fill="none" stroke="currentColor"><rect x="0.5" y="0.5" width="19" height="10" rx="2.6" opacity="0.4"/><rect x="2" y="2" width="13.5" height="7" rx="1.4" fill="currentColor" stroke="none"/><path d="M21 4v3" stroke-width="1.6" stroke-linecap="round" opacity="0.4"/></svg>
+    </span>
+  </div>
+
+  <div class="m-head" data-od-id="mobile-head">
+    <button class="btn btn--quiet btn--icon" aria-label="Threads">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16"/></svg>
+    </button>
+    <span class="m-head__title">Firecracker cold-start</span>
+    <button class="btn btn--quiet btn--icon" data-theme-toggle aria-label="Toggle theme">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" data-theme-icon="light"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4 16.9 7.1M7.1 16.9 5.4 18.6M18.6 18.6 16.9 16.9M7.1 7.1 5.4 5.4" stroke-linecap="round"/></svg>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" data-theme-icon="dark" hidden><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+
+  <div class="m-scroll" data-od-id="mobile-answer">
+    <p class="kicker">Asked 11:04 · 6 sources</p>
+    <h1>What changed in Firecracker microVM cold-start performance this year?</h1>
+
+    <article class="answer">
+      <p>The boot number itself barely moved. Firecracker still starts a minimal microVM in roughly a tenth of a second<a class="cite" data-ref="2" href="#source-2">2</a> — the same order of magnitude as when the design was first published. What changed is that almost nobody is measuring that number anymore.</p>
+
+      <h2>Restore replaced boot</h2>
+      <p>Restoring a saved microVM skips guest kernel boot and userspace init, so the cost moves to faulting memory back in.<span class="cite-group"><a class="cite" data-ref="1" href="#source-1">1</a><a class="cite" data-ref="3" href="#source-3">3</a></span> The <code>userfaultfd</code> handler serves guest pages on demand instead of loading the whole memory file up front,<a class="cite" data-ref="3" href="#source-3">3</a> so restore scales with the working set rather than the configured memory.</p>
+
+      <h2>The clock moved too</h2>
+      <p>Our budget doc now measures API accepted to first byte of customer code, not VMM start to kernel handoff.<a class="cite" data-ref="4" href="#source-4">4</a> On that clock the VMM is a minority of the total — snapshot fetch and network attach dominate.<a class="cite" data-ref="6" href="#source-6">6</a></p>
+
+      <p class="callout"><b>On our own fleet</b>, restore p50 has been flat since the UFFD rollout; p99 is the series that still moves.<a class="cite" data-ref="5" href="#source-5">5</a></p>
+    </article>
+
+    <nav class="m-followups" data-od-id="mobile-followups">
+      <p class="kicker">Keep pulling the thread</p>
+      <ul>
+        <li><a href="#">Does a UFFD restore leave the page cache warm?</a></li>
+        <li><a href="#">Break our cold-start budget down step by step</a></li>
+        <li><a href="#">What breaks snapshot compatibility across minor versions?</a></li>
+      </ul>
+    </nav>
+  </div>
+
+  <button class="sources-pill" id="pill" data-od-id="sources-pill">
+    Sources <b>6</b>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg>
+  </button>
+
+  <form class="m-composer" data-od-id="mobile-composer" onsubmit="event.preventDefault();">
+    <input type="text" placeholder="Ask a follow-up" aria-label="Ask a follow-up">
+    <button class="btn btn--primary btn--icon" type="submit" aria-label="Ask">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M12 5.5 18.5 12 12 18.5"/></svg>
+    </button>
+  </form>
+
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ───────── sources sheet ───────── -->
+  <section class="sheet" id="sheet" data-od-id="sources-sheet" aria-label="Sources">
+    <div class="sheet__grab" id="grab"><i></i></div>
+    <div class="sheet__head">
+      <div class="sheet__headline">
+        <p class="kicker" style="margin:0">Sources</p>
+        <span class="meta" data-rail-count>6 sources</span>
+      </div>
+      <div class="chips" data-rail-filters data-od-id="sheet-filters">
+        <button class="chip" type="button" data-kind="all" aria-pressed="true">All</button>
+        <button class="chip" type="button" data-kind="web" aria-pressed="false">Web</button>
+        <button class="chip" type="button" data-kind="internal" aria-pressed="false">Docs</button>
+        <button class="chip" type="button" data-kind="code" aria-pressed="false">Code</button>
+      </div>
+    </div>
+
+    <div class="rail__scroll">
+      <a class="source" id="source-1" data-ref="1" data-kind="code" href="#source-1" data-od-id="source-changelog">
+        <div class="source__top"><span class="source__n">1</span><h3 class="source__title">firecracker / CHANGELOG.md</h3></div>
+        <p class="source__snip">Release notes covering snapshot/restore changes, ACPI support in the guest, and the per-release statement on snapshot compatibility.</p>
+        <div class="source__foot"><span class="tag tag--code">Code</span><span class="source__domain">github.com/firecracker-microvm</span></div>
+      </a>
+
+      <a class="source" id="source-2" data-ref="2" data-kind="web" href="#source-2" data-od-id="source-nsdi">
+        <div class="source__top"><span class="source__n">2</span><h3 class="source__title">Firecracker: Lightweight Virtualization for Serverless Applications</h3></div>
+        <p class="source__snip">The original design paper — source of the baseline boot figure the fleet still quotes.</p>
+        <div class="source__foot"><span class="tag">Web</span><span class="source__domain">usenix.org · NSDI</span></div>
+      </a>
+
+      <a class="source" id="source-3" data-ref="3" data-kind="code" href="#source-3" data-od-id="source-uffd">
+        <div class="source__top"><span class="source__n">3</span><h3 class="source__title">Handling page faults on snapshot resume</h3></div>
+        <p class="source__snip">The userfaultfd handler contract: register guest memory, then serve pages on demand rather than populating the region before resume.</p>
+        <div class="source__foot"><span class="tag tag--code">Code</span><span class="source__domain">firecracker/docs/snapshotting</span></div>
+      </a>
+
+      <a class="source" id="source-4" data-ref="4" data-kind="internal" href="#source-4" data-od-id="source-budget">
+        <div class="source__top"><span class="source__n">4</span><h3 class="source__title">Cold-start budget — runtime platform</h3></div>
+        <p class="source__snip">Rewritten this quarter. Defines the end-to-end clock and allocates the budget across fetch, restore, network attach, and first byte.</p>
+        <div class="source__foot"><span class="tag tag--internal">Internal</span><span class="source__domain">wiki.internal/runtime</span></div>
+      </a>
+
+      <a class="source" id="source-5" data-ref="5" data-kind="internal" href="#source-5" data-od-id="source-benchmark">
+        <div class="source__top"><span class="source__n">5</span><h3 class="source__title">Weekly runtime benchmark — restore latency</h3></div>
+        <figure class="spark">
+          <svg viewBox="0 0 120 34" preserveAspectRatio="none" role="img" aria-label="Weekly restore latency: p99 varies week to week, p50 stays flat">
+            <path d="M0 12 L10 14 L20 10 L30 16 L40 13 L50 18 L60 11 L70 15 L80 9 L90 17 L100 13 L110 12 L120 14 L120 34 L0 34 Z" fill="color-mix(in oklch, var(--fg) 14%, transparent)"/>
+            <path d="M0 12 L10 14 L20 10 L30 16 L40 13 L50 18 L60 11 L70 15 L80 9 L90 17 L100 13 L110 12 L120 14" fill="none" stroke="var(--fg)" stroke-width="1" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+            <path d="M0 27 L10 27.3 L20 26.6 L30 27 L40 27.2 L50 26.8 L60 27 L70 26.7 L80 27.1 L90 27 L100 26.9 L110 27 L120 26.8" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>
+          </svg>
+          <figcaption>p99 / p50 · 13 weeks · this cluster</figcaption>
+        </figure>
+        <p class="source__snip">Restore latency since the UFFD rollout. Cluster-specific values — not a general Firecracker benchmark.</p>
+        <div class="source__foot"><span class="tag tag--internal">Internal</span><span class="source__domain">metrics.internal/runtime</span></div>
+      </a>
+
+      <a class="source" id="source-6" data-ref="6" data-kind="web" href="#source-6" data-od-id="source-snapstart">
+        <div class="source__top"><span class="source__n">6</span><h3 class="source__title">Lambda SnapStart — how it works</h3></div>
+        <p class="source__snip">Corroboration that the optimisation effort at the function layer sits in restore, not boot.</p>
+        <div class="source__foot"><span class="tag">Web</span><span class="source__domain">docs.aws.amazon.com</span></div>
+      </a>
+    </div>
+  </section>
+</div>
+
+<p class="meta" style="text-align:center">Also in this prototype: <a href="home.html">home</a> · <a href="answer-streaming.html">streaming</a> · <a href="answer-complete.html">complete answer</a> · <a href="settings.html">settings</a></p>
+
+<script src="libra.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var sheet = document.getElementById('sheet');
+  var grab = document.getElementById('grab');
+  var scrim = document.getElementById('scrim');
+  var pill = document.getElementById('pill');
+  var state = 'peek';
+
+  function offsets() {
+    var h = sheet.offsetHeight;
+    return { peek: h - 92, half: h * 0.46, full: 0 };
+  }
+
+  function setState(next) {
+    state = next;
+    sheet.style.transform = 'translateY(' + offsets()[next] + 'px)';
+    scrim.classList.toggle('is-on', next !== 'peek');
+    pill.hidden = next !== 'peek';
+  }
+
+  /* drag the handle, snap to the nearest detent */
+  var startY = 0, startOffset = 0, dragging = false;
+
+  grab.addEventListener('pointerdown', function (e) {
+    dragging = true;
+    startY = e.clientY;
+    startOffset = offsets()[state];
+    sheet.classList.add('is-dragging');
+    grab.setPointerCapture(e.pointerId);
+  });
+
+  grab.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var o = offsets();
+    var y = Math.max(o.full, Math.min(o.peek, startOffset + (e.clientY - startY)));
+    sheet.style.transform = 'translateY(' + y + 'px)';
+  });
+
+  grab.addEventListener('pointerup', function (e) {
+    if (!dragging) return;
+    dragging = false;
+    sheet.classList.remove('is-dragging');
+    var o = offsets();
+    var y = Math.max(o.full, Math.min(o.peek, startOffset + (e.clientY - startY)));
+    var nearest = ['peek', 'half', 'full'].reduce(function (best, k) {
+      return Math.abs(o[k] - y) < Math.abs(o[best] - y) ? k : best;
+    }, 'peek');
+    setState(nearest);
+  });
+
+  grab.addEventListener('click', function () {
+    setState(state === 'peek' ? 'half' : state === 'half' ? 'full' : 'peek');
+  });
+
+  pill.addEventListener('click', function () { setState('half'); });
+  scrim.addEventListener('click', function () { setState('peek'); });
+
+  /* a citation in the answer pulls the sheet up with it */
+  document.querySelector('.m-scroll').addEventListener('click', function (e) {
+    var cite = e.target.closest('.cite');
+    if (!cite) return;
+    e.preventDefault();
+    if (state === 'peek') setState('half');
+    window.setTimeout(function () { window.LibraCitations.reveal(cite.dataset.ref); }, 300);
+  });
+
+  window.addEventListener('resize', function () { setState(state); });
+  setState('peek');
+})();
+</script>
+</body>
+</html>

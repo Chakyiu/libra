@@ -1,4 +1,4 @@
-//! Stock quotes from Stooq (keyless CSV), like upstream Vane's stock widget.
+//! Stock quotes from Stooq (keyless CSV), like the original project's stock widget.
 
 use crate::blocks::{Block, BlockType};
 use reqwest::Client;

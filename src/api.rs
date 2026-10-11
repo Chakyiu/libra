@@ -1,6 +1,6 @@
 //! HTTP surface: JSON in, SSE out. One endpoint per frontend feature.
 
-use crate::error::{VaneError, VaneResult};
+use crate::error::{LibraError, LibraResult};
 use crate::pipeline::AskRequest;
 use crate::search::types::{SearchKind, SearchQuery};
 use crate::state::{App, Event};
@@ -65,7 +65,7 @@ async fn get_settings(State(app): State<Arc<App>>) -> Json<Value> {
     Json(app.settings.get().settings_json())
 }
 
-async fn put_settings(State(app): State<Arc<App>>, Json(patch): Json<Value>) -> VaneResult<Json<Value>> {
+async fn put_settings(State(app): State<Arc<App>>, Json(patch): Json<Value>) -> LibraResult<Json<Value>> {
     let saved = crate::settings::apply_patch(&app.settings, &patch, std::path::Path::new(&app.db.path))?;
     Ok(Json(saved))
 }
@@ -82,27 +82,27 @@ struct ChatQuery {
     chat_id: Option<String>,
 }
 
-async fn list_chats(State(app): State<Arc<App>>) -> VaneResult<Json<Value>> {
+async fn list_chats(State(app): State<Arc<App>>) -> LibraResult<Json<Value>> {
     let chats = app.db.list_chats(100).await?;
     Ok(Json(json!(chats)))
 }
 
-async fn create_chat(State(app): State<Arc<App>>, Query(q): Query<ChatQuery>) -> VaneResult<Json<Value>> {
+async fn create_chat(State(app): State<Arc<App>>, Query(q): Query<ChatQuery>) -> LibraResult<Json<Value>> {
     let cfg = app.settings.get();
     let id = q.chat_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let chat = app.db.create_chat(&id, &cfg.now()).await?;
     Ok(Json(json!(chat)))
 }
 
-async fn get_chat(State(app): State<Arc<App>>, Path(id): Path<String>) -> VaneResult<Json<Value>> {
+async fn get_chat(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<Json<Value>> {
     let Some(chat) = app.db.get_chat(&id).await? else {
-        return Err(VaneError::NotFound(format!("chat {id}")));
+        return Err(LibraError::NotFound(format!("chat {id}")));
     };
     let messages = app.db.get_messages(&id).await?;
     Ok(Json(json!({ "chat": chat, "messages": messages })))
 }
 
-async fn delete_chat(State(app): State<Arc<App>>, Path(id): Path<String>) -> VaneResult<StatusCode> {
+async fn delete_chat(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<StatusCode> {
     app.db.delete_chat(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -118,7 +118,7 @@ async fn rename_chat(
     State(app): State<Arc<App>>,
     Path(id): Path<String>,
     Json(body): Json<RenameBody>,
-) -> VaneResult<StatusCode> {
+) -> LibraResult<StatusCode> {
     app.db.rename_chat(&id, &body.title, &body.emoji).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -162,7 +162,7 @@ fn stream_events(rx: UnboundedReceiver<Event>) -> Response {
 
 // ------------------------------------------------------------------ upload
 
-async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> VaneResult<Json<Value>> {
+async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> LibraResult<Json<Value>> {
     let cfg = app.settings.get();
     let mut chat_id = String::new();
     let mut files: Vec<(String, String, Vec<u8>)> = Vec::new();
@@ -170,7 +170,7 @@ async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> VaneRe
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| VaneError::BadRequest(format!("multipart: {e}")))?
+        .map_err(|e| LibraError::BadRequest(format!("multipart: {e}")))?
     {
         let name = field.name().unwrap_or_default().to_string();
         if name == "chatId" || name == "chat_id" {
@@ -184,9 +184,9 @@ async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> VaneRe
         let bytes = field
             .bytes()
             .await
-            .map_err(|e| VaneError::BadRequest(format!("read upload: {e}")))?;
+            .map_err(|e| LibraError::BadRequest(format!("read upload: {e}")))?;
         if bytes.len() > cfg.max_upload_mb * 1024 * 1024 {
-            return Err(VaneError::BadRequest(format!(
+            return Err(LibraError::BadRequest(format!(
                 "{} is larger than the {max} MB limit",
                 filename,
                 max = cfg.max_upload_mb
@@ -196,7 +196,7 @@ async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> VaneRe
     }
 
     if chat_id.trim().is_empty() {
-        return Err(VaneError::BadRequest("chatId is required".into()));
+        return Err(LibraError::BadRequest("chatId is required".into()));
     }
 
     let mut out = Vec::new();
@@ -226,7 +226,7 @@ struct SearchParams {
     page: Option<usize>,
 }
 
-async fn search(State(app): State<Arc<App>>, Query(p): Query<SearchParams>) -> VaneResult<Json<Value>> {
+async fn search(State(app): State<Arc<App>>, Query(p): Query<SearchParams>) -> LibraResult<Json<Value>> {
     let kind = SearchKind::parse(p.kind.as_deref().unwrap_or("web"));
     let mut query = SearchQuery {
         query: p.q,
@@ -238,7 +238,7 @@ async fn search(State(app): State<Arc<App>>, Query(p): Query<SearchParams>) -> V
         ..Default::default()
     };
     let response = app.search.run(kind, &mut query).await;
-    Ok(Json(serde_json::to_value(response).map_err(VaneError::any)?))
+    Ok(Json(serde_json::to_value(response).map_err(LibraError::any)?))
 }
 
 // ------------------------------------------------------- suggestions & co
@@ -248,7 +248,7 @@ struct Q {
     q: String,
 }
 
-async fn suggestions(State(app): State<Arc<App>>, Query(p): Query<Q>) -> VaneResult<Json<Value>> {
+async fn suggestions(State(app): State<Arc<App>>, Query(p): Query<Q>) -> LibraResult<Json<Value>> {
     let cfg = app.settings.get();
     let items = crate::suggestions::suggestions(&app.http, &cfg, &p.q).await?;
     Ok(Json(json!(items)))
@@ -259,7 +259,7 @@ struct DiscoverQuery {
     chat_id: String,
 }
 
-async fn discover(State(app): State<Arc<App>>, Query(p): Query<DiscoverQuery>) -> VaneResult<Json<Value>> {
+async fn discover(State(app): State<Arc<App>>, Query(p): Query<DiscoverQuery>) -> LibraResult<Json<Value>> {
     let cfg = app.settings.get();
     let v = crate::discover::questions(&app.db, &app.cache, &app.http, &cfg, &p.chat_id).await?;
     Ok(Json(v))
@@ -270,7 +270,7 @@ struct ImageBody {
     prompt: String,
 }
 
-async fn generate_image(State(app): State<Arc<App>>, Json(b): Json<ImageBody>) -> VaneResult<Json<Value>> {
+async fn generate_image(State(app): State<Arc<App>>, Json(b): Json<ImageBody>) -> LibraResult<Json<Value>> {
     let cfg = app.settings.get();
     let v = crate::media::generate(&app.http, &cfg, &b.prompt).await?;
     Ok(Json(v))

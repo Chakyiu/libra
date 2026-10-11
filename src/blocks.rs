@@ -1,6 +1,6 @@
 //! Blocks are the unit of both the wire protocol and persistence: the client renders
 //! them as they stream in, and the same array is stored so a chat replays without
-//! re-generating anything. Shape follows upstream Vane's `blocks` table.
+//! re-generating anything. Shape follows the original project's `blocks` table.
 
 use crate::search::types::SearchResult;
 use serde::{Deserialize, Serialize};

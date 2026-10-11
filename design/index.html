@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Libra — screens</title>
+<link rel="stylesheet" href="libra.css">
+<script>try{var t=localStorage.getItem('libra:theme')||'light';document.documentElement.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;}catch(e){}</script>
+<style>
+  body { overflow-y: auto; }
+
+  .sheetwrap { max-width: 68rem; margin: 0 auto; padding: 44px 32px 80px; }
+
+  .cover {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 48px;
+    align-items: end;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .cover h1 {
+    font-family: var(--font-display);
+    font-size: 60px;
+    line-height: 0.98;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+    margin: 16px 0 0;
+  }
+
+  .cover h1 em { font-style: italic; color: var(--muted); }
+
+  .cover__lede {
+    font-family: var(--font-display);
+    font-size: 17.5px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0;
+    max-width: 48ch;
+  }
+
+  .spec { list-style: none; margin: 0; padding: 0; }
+  .spec li {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 14px;
+    padding: 7px 0;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .spec dt, .spec b {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+    padding-top: 2px;
+  }
+
+  .swatches { display: flex; gap: 0; margin-top: 2px; }
+  .swatches i {
+    width: 26px; height: 18px;
+    display: block;
+    border: 1px solid var(--border);
+    border-right: 0;
+  }
+  .swatches i:last-child { border-right: 1px solid var(--border); }
+
+  /* ── screen grid ── */
+  .screens {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 34px 28px;
+    margin-top: 38px;
+  }
+
+  .screen { display: block; text-decoration: none; }
+
+  .frame {
+    display: block;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    overflow: hidden;
+    position: relative;
+    transition: border-color 160ms;
+  }
+  .screen:hover .frame { border-color: color-mix(in oklch, var(--border) 30%, var(--fg) 45%); }
+
+  .frame iframe {
+    border: 0;
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    pointer-events: none;
+    display: block;
+  }
+
+  .frame[data-fit='height'] iframe { left: 50%; transform-origin: 50% 0; }
+
+  /* aside that squares off the last grid row */
+  .demo-note {
+    align-self: end;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+  .demo-note h2 {
+    font-family: var(--font-display);
+    font-size: 19px;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    margin: 8px 0 10px;
+  }
+  .demo-note p { font-size: 13.5px; line-height: 1.6; color: var(--muted); margin: 0 0 10px; max-width: 42ch; }
+  .demo-note ol { margin: 0; padding-left: 1.2em; }
+  .demo-note li { font-size: 13.5px; line-height: 1.6; color: var(--muted); margin-bottom: 6px; }
+  .demo-note li b { color: var(--fg); font-weight: 550; }
+
+  .screen__cap {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-top: 11px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .screen__n {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    flex: none;
+  }
+
+  .screen__cap h2 {
+    font-family: var(--font-display);
+    font-size: 17px;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    margin: 0;
+    flex: 1;
+  }
+
+  .screen__cap span { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+
+  .screen p {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 9px 0 0;
+    max-width: 46ch;
+  }
+
+  .notes { margin-top: 56px; border-top: 1px solid var(--border); padding-top: 22px; }
+  .notes h3 {
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+  .notes ul { margin: 0; padding-left: 1.1em; max-width: 68ch; }
+  .notes li { font-size: 13.5px; line-height: 1.6; margin-bottom: 7px; }
+
+  @media (max-width: 860px) {
+    .cover { grid-template-columns: minmax(0, 1fr); gap: 26px; align-items: start; }
+    .cover h1 { font-size: 42px; }
+    .screens { grid-template-columns: minmax(0, 1fr); }
+    .screen--tall { grid-row: auto; }
+    .sheetwrap { padding: 28px 20px 56px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="sheetwrap">
+
+  <header class="cover" data-od-id="cover">
+    <div>
+      <span class="wordmark" data-od-id="wordmark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.5v16.5M7.5 20h9M4 7.5h16"/>
+          <path d="M4 7.5 1.4 13.5h5.2L4 7.5Z"/>
+          <path d="M20 7.5l-2.6 6h5.2L20 7.5Z"/>
+        </svg>
+        <b>Libra</b>
+      </span>
+      <span class="tag" style="margin-left:8px;vertical-align:3px">Prototype</span>
+      <h1>A self-hosted answer engine that <em>shows its work</em></h1>
+      <p class="cover__lede" style="margin-top:18px">Five screens of desktop-first product UI. Every claim in an answer carries a numbered chip that lights its entry in the sources rail — on the desktop that rail is always there, on mobile it is a sheet.</p>
+    </div>
+
+    <ul class="spec" data-od-id="system-spec">
+      <li><b>Direction</b><span>Editorial — paper, ink, hairlines. No cards, no shadows on content.</span></li>
+      <li><b>Palette</b><span class="swatches" aria-label="Palette: background, surface, foreground, muted, border, accent">
+        <i style="background:oklch(98% 0.004 95)"></i>
+        <i style="background:oklch(100% 0.002 95)"></i>
+        <i style="background:oklch(20% 0.018 70)"></i>
+        <i style="background:oklch(48% 0.012 70)"></i>
+        <i style="background:oklch(90% 0.006 95)"></i>
+        <i style="background:oklch(52% 0.10 28)"></i>
+      </span></li>
+      <li><b>Type</b><span>Charter / Iowan Old Style for the answer and headlines; system sans for chrome; mono for metadata and citation numbers.</span></li>
+      <li><b>Theme</b><span>Light-first, dark mode persisted across all screens.</span></li>
+      <li><b>Demo query</b><span>What changed in Firecracker microVM cold-start performance this year?</span></li>
+    </ul>
+  </header>
+
+  <div class="screens" data-od-id="screen-grid">
+
+    <a class="screen" href="home.html" data-od-id="screen-home">
+      <div class="frame" data-w="1440" data-h="900"><iframe src="home.html" width="1440" height="900" loading="lazy" title="Home screen preview" tabindex="-1" scrolling="no"></iframe></div>
+      <div class="screen__cap"><span class="screen__n">01</span><h2>Home — the ask</h2><span>home.html</span></div>
+      <p>Centered ask box with source-scope chips, the thread sidebar at rest, and an instance status strip that says what is indexed and when it last synced.</p>
+    </a>
+
+    <a class="screen" href="answer-streaming.html" data-od-id="screen-streaming">
+      <div class="frame" data-w="1440" data-h="900"><iframe src="answer-streaming.html" width="1440" height="900" loading="lazy" title="Streaming answer preview" tabindex="-1" scrolling="no"></iframe></div>
+      <div class="screen__cap"><span class="screen__n">02</span><h2>Answering — live</h2><span>answer-streaming.html</span></div>
+      <p>Retrieval first: the rail fills from skeletons, then prose types in. Each citation lights its source the moment it is written. Replay it from the topbar.</p>
+    </a>
+
+    <a class="screen" href="answer-complete.html" data-od-id="screen-complete">
+      <div class="frame" data-w="1440" data-h="900"><iframe src="answer-complete.html" width="1440" height="900" loading="lazy" title="Complete answer preview" tabindex="-1" scrolling="no"></iframe></div>
+      <div class="screen__cap"><span class="screen__n">03</span><h2>Answer — complete</h2><span>answer-complete.html</span></div>
+      <p>The reading screen. Serif answer column, superscript citation chips, sticky filterable rail, follow-ups as plain text links, composer docked at the bottom.</p>
+    </a>
+
+    <a class="screen" href="settings.html" data-od-id="screen-settings">
+      <div class="frame" data-w="1440" data-h="900"><iframe src="settings.html" width="1440" height="900" loading="lazy" title="Settings preview" tabindex="-1" scrolling="no"></iframe></div>
+      <div class="screen__cap"><span class="screen__n">04</span><h2>Settings</h2><span>settings.html</span></div>
+      <p>Connectors, answering rules, reading preferences, access and retention. The appearance controls are live — theme, column width, and answer typeface all apply immediately.</p>
+    </a>
+
+    <a class="screen" href="mobile-sources.html" data-od-id="screen-mobile">
+      <div class="frame" data-fit="height" data-w="470" data-h="980" data-box="560"><iframe src="mobile-sources.html" width="470" height="980" loading="lazy" title="Mobile sources sheet preview" tabindex="-1" scrolling="no"></iframe></div>
+      <div class="screen__cap"><span class="screen__n">05</span><h2>Mobile — sources sheet</h2><span>mobile-sources.html</span></div>
+      <p>390×844. The rail becomes a draggable sheet with three detents; tapping a citation pulls it to half-height and scrolls to the right entry.</p>
+    </a>
+
+    <aside class="demo-note" data-od-id="demo-note">
+      <span class="kicker">Walking someone through it</span>
+      <h2>A two-minute path</h2>
+      <p>The order that makes the citation model land for someone seeing Libra for the first time.</p>
+      <ol>
+        <li>Open <b>Home</b> and send the Firecracker question as written.</li>
+        <li>Watch retrieval land before a single word is written — that ordering is the product argument.</li>
+        <li>On the finished answer, hover chip <b>3</b>, then filter the rail to <b>Docs</b>.</li>
+        <li>Switch to dark in <b>Settings</b>, then come back — it followed you.</li>
+        <li>End on <b>mobile</b>: the rail is the same object, just folded.</li>
+      </ol>
+    </aside>
+
+  </div>
+
+  <section class="notes" data-od-id="prototype-notes">
+    <h3>What actually works</h3>
+    <ul>
+      <li>Hover or focus any numbered citation to light its rail entry; click to scroll the rail to it.</li>
+      <li>Filter the rail by <em>Web</em>, <em>Docs</em>, or <em>Code</em> — the count updates with the filter.</li>
+      <li><span class="kbd">[</span> collapses the thread sidebar, <span class="kbd">/</span> jumps to the composer; both preferences persist.</li>
+      <li>Theme is shared across every screen through <code style="font-family:var(--font-mono);font-size:12px">localStorage</code>, so dark mode survives navigation.</li>
+      <li>The streaming screen can be stopped mid-answer and replayed.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+  /* scale each preview iframe to its card */
+  function fit() {
+    document.querySelectorAll('.frame').forEach(function (frame) {
+      var w = Number(frame.dataset.w), h = Number(frame.dataset.h);
+      var iframe = frame.querySelector('iframe');
+      var s;
+      if (frame.dataset.fit === 'height') {
+        var box = Number(frame.dataset.box);
+        s = box / h;
+        frame.style.height = box + 'px';
+        iframe.style.marginLeft = -(w / 2) + 'px';
+      } else {
+        s = (frame.clientWidth || frame.parentElement.clientWidth) / w;
+        frame.style.height = Math.round(h * s) + 'px';
+      }
+      iframe.style.transform = 'scale(' + s + ')';
+    });
+  }
+  window.addEventListener('resize', fit);
+  window.addEventListener('load', fit);
+  document.addEventListener('DOMContentLoaded', fit);
+  fit();
+</script>
+</body>
+</html>

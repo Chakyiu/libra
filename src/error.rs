@@ -19,7 +19,7 @@ impl From<reqwest::Error> for ProviderError {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum VaneError {
+pub enum LibraError {
     #[error("bad request: {0}")]
     BadRequest(String),
     #[error("not found: {0}")]
@@ -35,20 +35,20 @@ pub enum VaneError {
     Anyhow(#[from] anyhow::Error),
 }
 
-impl VaneError {
+impl LibraError {
     pub fn any<E: std::fmt::Display>(e: E) -> Self {
-        VaneError::Anyhow(anyhow::anyhow!("{e}"))
+        LibraError::Anyhow(anyhow::anyhow!("{e}"))
     }
 }
 
-impl IntoResponse for VaneError {
+impl IntoResponse for LibraError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
-            VaneError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
-            VaneError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
-            VaneError::NoModel(_) => (StatusCode::PRECONDITION_FAILED, "no_model"),
-            VaneError::Provider { .. } => (StatusCode::BAD_GATEWAY, "provider_error"),
-            VaneError::Anyhow(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+            LibraError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            LibraError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            LibraError::NoModel(_) => (StatusCode::PRECONDITION_FAILED, "no_model"),
+            LibraError::Provider { .. } => (StatusCode::BAD_GATEWAY, "provider_error"),
+            LibraError::Anyhow(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         };
         if status.is_server_error() {
             tracing::error!(error = %self, "request failed");
@@ -61,4 +61,4 @@ impl IntoResponse for VaneError {
     }
 }
 
-pub type VaneResult<T> = Result<T, VaneError>;
+pub type LibraResult<T> = Result<T, LibraError>;

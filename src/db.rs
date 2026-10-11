@@ -1,5 +1,5 @@
 //! SQLite persistence: chats, messages (with their block arrays), uploads and chunks.
-//! Schema stays close to upstream Vane's drizzle schema so existing data can be imported.
+//! Schema stays close to the original project's drizzle schema so existing data can be imported.
 
 use crate::blocks::Block;
 use anyhow::Context;

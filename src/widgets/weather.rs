@@ -1,4 +1,4 @@
-//! Current weather + 5-day forecast from Open-Meteo (keyless), like upstream Vane.
+//! Current weather + 5-day forecast from Open-Meteo (keyless), like the original project.
 
 use crate::blocks::{Block, BlockType};
 use crate::config::Config;

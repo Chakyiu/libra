@@ -5,7 +5,7 @@ export default function VideosPage() {
     <MediaSearch
       kind="videos"
       title="Videos"
-      hint="Video search — works best with SearxNG, which aggregates YouTube, Vimeo and Dailymotion."
+      hint="Video search works best with SearxNG, which gathers YouTube, Vimeo and Dailymotion results."
     />
   );
 }

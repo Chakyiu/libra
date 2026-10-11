@@ -1,0 +1,123 @@
+/* ─── composer (docked, not a chat bubble) ───────────────── */
+
+.composer {
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  padding: 14px 40px 18px;
+  position: relative;
+}
+
+.composer.is-busy .composer__inner { opacity: 0.55; pointer-events: none; }
+
+.composer__inner { max-width: var(--col); margin: 0 auto; }
+
+.composer__field {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom-color: color-mix(in oklch, var(--border) 50%, var(--fg) 18%);
+  border-radius: 4px;
+  padding: 9px 9px 9px 14px;
+  transition: border-color 140ms;
+}
+
+.composer__field:focus-within { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  resize: none;
+  padding: 6px 0;
+  max-height: 140px;
+}
+.composer textarea:focus { outline: none; }
+.composer textarea::placeholder { color: var(--muted); }
+
+.composer__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.composer__error {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent);
+  margin: 8px 0 0;
+}
+.composer__error a { color: inherit; text-underline-offset: 2px; }
+
+/* ─── the home ask box ───────────────────────────────────── */
+
+.askbox { margin-top: 36px; text-align: left; }
+
+.askbox__field {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid color-mix(in oklch, var(--border) 55%, var(--fg) 18%);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 14px 14px 14px 18px;
+  transition: border-color 150ms;
+}
+
+.askbox__field:focus-within { border-color: color-mix(in oklch, var(--accent) 60%, var(--border)); }
+
+.askbox textarea {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  resize: none;
+  height: 54px;
+  padding: 0;
+}
+.askbox textarea:focus { outline: none; }
+.askbox textarea::placeholder { color: var(--muted); }
+
+.askbox__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.askbox__hint { display: flex; align-items: center; gap: 6px; }
+
+.askbox__error {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--accent);
+  margin: 10px 0 0;
+}
+
+@media (max-width: 1100px) {
+  .composer { padding: 14px 28px 18px; }
+}
+
+@media (max-width: 760px) {
+  .composer { padding: 10px 14px 14px; }
+  .composer__hint { display: none; }
+  .composer .btn--primary { padding: 7px; width: 38px; justify-content: center; }
+  .askbox textarea { font-size: 16.5px; height: 48px; }
+  .askbox__hint { display: none; }
+}

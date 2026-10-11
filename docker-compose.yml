@@ -1,20 +1,18 @@
 services:
-  vane:
+  libra:
     build: .
     ports:
       - "3001:3001"
     environment:
       PORT: 3001
-      VANE_DATA_DIR: /data
-      DATABASE_URL: /data/vane.db
+      LIBRA_DATA_DIR: /data
+      DATABASE_URL: /data/libra.db
       REDIS_URL: redis://redis:6379
       SEARXNG_API_URL: http://searxng:8080
       RUST_LOG: info
-      # OPENAI_API_KEY: sk-…
-      # ANTHROPIC_API_KEY: …
-      # GEMINI_API_KEY: …
+      # Model providers are added in Settings → Model providers, not here.
     volumes:
-      - vane-data:/data
+      - libra-data:/data
     depends_on:
       - redis
       - searxng
@@ -38,5 +36,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  vane-data:
+  libra-data:
   redis-data:

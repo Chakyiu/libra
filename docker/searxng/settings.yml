@@ -8,7 +8,7 @@ server:
 search:
   safe_search: 0
   autocomplete: duckduckgo
-  # Vane talks to SearxNG through the JSON API.
+  # Libra talks to SearxNG through the JSON API.
   formats:
     - html
     - json

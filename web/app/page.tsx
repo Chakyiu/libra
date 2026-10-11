@@ -1,10 +1,10 @@
 import { Suspense } from "react";
-import Chat from "@/components/Chat";
+import Main from "@/components/Main";
 
-export default function Home() {
+export default function Page() {
   return (
     <Suspense fallback={null}>
-      <Chat />
+      <Main />
     </Suspense>
   );
 }

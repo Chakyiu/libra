@@ -4,7 +4,7 @@ use crate::search::{parse_html, select, select_in, text_of, urldecode, urlencode
 use reqwest::Client;
 use std::pin::Pin;
 
-/// DuckDuckGo has no free API — scrape the HTML endpoint, like upstream Vane does.
+/// DuckDuckGo has no free API — scrape the HTML endpoint, like the original project does.
 pub struct DuckDuckGo {
     http: Client,
 }

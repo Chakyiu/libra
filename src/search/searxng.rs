@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde_json::Value;
 use std::pin::Pin;
 
-/// Self-hosted SearxNG metasearch — the privacy-first default of upstream Vane.
+/// Self-hosted SearxNG metasearch — the privacy-first default of the original project.
 pub struct Searxng {
     http: Client,
     cfg: SettingsHandle,

@@ -64,7 +64,8 @@ pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: Chat
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    for data in parser.push(&bytes) {
+                    let batch = parser.push(&bytes);
+                    for data in batch.data {
                         let Ok(v) = serde_json::from_str::<Value>(&data) else { continue };
                         match v["type"].as_str() {
                             Some("content_block_delta") => {
@@ -79,12 +80,17 @@ pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: Chat
                                 let _ = tx.send(Delta::Error(msg.to_string()));
                                 return;
                             }
+                            // message_stop is the end. Don't keep reading into the close.
+                            Some("message_stop") => return,
                             _ => {}
                         }
                     }
+                    if batch.done {
+                        return;
+                    }
                 }
                 Err(e) => {
-                    let _ = tx.send(Delta::Error(format!("stream read failed: {e}")));
+                    let _ = tx.send(Delta::Error(format!("stream read failed: {}", error_detail(&e))));
                     return;
                 }
             }

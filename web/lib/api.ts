@@ -18,13 +18,15 @@ export type Block = {
   extra?: any;
 };
 
+export type FileRef = { id: string; name: string };
+
 export type Chat = {
   id: string;
   title: string;
   created_at: string;
   updated_at: string;
   sources: any[];
-  files: { id: string; name: string }[];
+  files: FileRef[];
 };
 
 export type ChatMessage = {
@@ -32,8 +34,42 @@ export type ChatMessage = {
   role: string;
   content: string;
   blocks: Block[];
-  files: { id: string; name: string }[];
+  /** ids of the uploaded files the question was asked against */
+  files: string[];
   created_at: string;
+};
+
+export type ModelOptions = { chat: string[]; embedding: string[] };
+
+export type Health = {
+  status: string;
+  redis: boolean;
+  searchProviders: string[];
+  models: ModelOptions;
+};
+
+export type Provider = {
+  id: string;
+  name: string;
+  type: string;
+  base_url: string;
+  api_key: string;
+  models: string[];
+  embedding_models: string[];
+};
+
+/** GET /api/settings — the mutable part of the server config. */
+export type Settings = {
+  providers: Provider[];
+  defaultModel: string;
+  defaultLightModel: string;
+  defaultRerankModel: string;
+  defaultEmbeddingModel: string;
+  defaultTemperature: number;
+  searchOrder: Record<"web" | "news" | "images" | "videos", string[]>;
+  enabledProviders: string[];
+  disabledWidgets: string[];
+  [key: string]: any;
 };
 
 export type AskEvent =
@@ -43,21 +79,41 @@ export type AskEvent =
   | { type: "e" }
   | { type: "c"; message: string };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(body || `${res.status} ${res.statusText}`);
+    let message = body;
+    try {
+      message = (JSON.parse(body)?.error?.message ?? body).replace(/^(bad request|not found): /, "");
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(message || `${res.status} ${res.statusText}`, res.status);
   }
   return res.status === 204 ? (undefined as T) : res.json();
 }
 
-export const postJson = (path: string, body: unknown) =>
-  api(path, {
-    method: "POST",
+export const putJson = <T = any>(path: string, body: unknown) =>
+  api<T>(path, {
+    method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+
+/** Idempotent: makes sure the chat row exists so uploads are listed on it. */
+export const ensureChat = (id: string) => api<Chat>(`/api/chats?chat_id=${encodeURIComponent(id)}`, { method: "POST" });
+
+export const deleteChat = (id: string) => api<void>(`/api/chats/${id}`, { method: "DELETE" });
 
 export async function uploadFiles(chatId: string, files: FileList | File[]) {
   const form = new FormData();
@@ -77,6 +133,7 @@ export async function ask(body: unknown, onEvent: (e: AskEvent) => void, signal?
     body: JSON.stringify(body),
     signal,
   });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   if (!res.body) throw new Error("no response body");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -100,12 +157,12 @@ export async function ask(body: unknown, onEvent: (e: AskEvent) => void, signal?
   }
 }
 
-export const host = (url: string) => {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-};
-
-export const favicon = (url: string) => `https://www.google.com/s2/favicons?domain=${host(url)}&sz=32`;
+/** crypto.randomUUID only exists in secure contexts; a LAN http:// install is not one. */
+export function uuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}

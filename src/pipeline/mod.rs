@@ -1,7 +1,7 @@
 use crate::blocks::{Block, BlockType};
 use crate::config::{Config, SettingsHandle};
 use crate::db::{ChatMessage, Db};
-use crate::error::VaneError;
+use crate::error::LibraError;
 use crate::llm::{self, ChatRequest, Delta, Llm, Msg};
 use crate::prompts;
 use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
@@ -591,8 +591,8 @@ fn build_references(results: &[SearchResult]) -> String {
         .join("\n\n")
 }
 
-pub async fn title_and_emoji(cfg: &Config, http: &reqwest::Client, db: &Db, chat_id: &str, query: &str) -> Result<(), VaneError> {
-    let llm = llm::resolve_chat(cfg, http, &cfg.default_light_model)?;
+pub async fn title_and_emoji(cfg: &Config, http: &reqwest::Client, db: &Db, chat_id: &str, query: &str) -> Result<(), LibraError> {
+    let llm = llm::resolve_chat(cfg, http, cfg.light_model())?;
     let v = llm
         .json_call(prompts::QUERY_TITLE_SYSTEM, &prompts::fill(prompts::QUERY_TITLE_USER, &[("query", query)]), None)
         .await

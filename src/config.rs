@@ -26,8 +26,6 @@ pub struct Provider {
     pub models: Vec<String>,
     #[serde(default)]
     pub embedding_models: Vec<String>,
-    #[serde(default)]
-    pub built_in: bool,
 }
 
 /// Runtime settings: env/file defaults, live-overridable through the settings API.
@@ -102,7 +100,7 @@ impl SettingsHandle {
 
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
-        let data_dir = std::env::var("VANE_DATA_DIR")
+        let data_dir = std::env::var("LIBRA_DATA_DIR")
             .or_else(|_| std::env::var("DATA_DIR"))
             .map(PathBuf::from)
             .unwrap_or_else(|_| Self::default_data_dir());
@@ -117,91 +115,32 @@ impl Config {
     }
 
     fn default_data_dir() -> PathBuf {
-        let dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".vane"));
-        dir.join("vane-next")
+        let dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".libra"));
+        dir.join("libra")
     }
 
     fn defaults(data_dir: &PathBuf) -> Self {
-        let ollama_url = std::env::var("OLLAMA_API_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:11434/v1".to_string());
-        let providers = vec![
-            Provider {
-                id: "ollama".into(),
-                name: "Ollama".into(),
-                kind: ProviderKind::Ollama,
-                base_url: ollama_url.clone(),
-                api_key: String::new(),
-                models: vec!["llama3.1:8b".into(), "qwen2.5:7b".into(), "mistral-small:24b".into()],
-                embedding_models: vec!["nomic-embed-text:latest".into(), "mxbai-embed-large:latest".into()],
-                built_in: true,
-            },
-            Provider {
-                id: "openai".into(),
-                name: "OpenAI".into(),
-                kind: ProviderKind::OpenAi,
-                base_url: "https://api.openai.com/v1".into(),
-                api_key: String::new(),
-                models: vec!["gpt-4.1-mini".into(), "gpt-4o".into(), "o4-mini".into()],
-                embedding_models: vec!["text-embedding-3-small".into(), "text-embedding-3-large".into()],
-                built_in: true,
-            },
-            Provider {
-                id: "openrouter".into(),
-                name: "OpenRouter".into(),
-                kind: ProviderKind::OpenRouter,
-                base_url: "https://openrouter.ai/api/v1".into(),
-                api_key: String::new(),
-                models: vec![
-                    "openai/gpt-4.1-mini".into(),
-                    "anthropic/claude-3.5-sonnet".into(),
-                    "meta-llama/llama-3.1-70b-instruct".into(),
-                ],
-                embedding_models: vec![],
-                built_in: true,
-            },
-            Provider {
-                id: "anthropic".into(),
-                name: "Anthropic".into(),
-                kind: ProviderKind::Anthropic,
-                base_url: "https://api.anthropic.com".into(),
-                api_key: String::new(),
-                models: vec!["claude-sonnet-4-5".into(), "claude-3-5-haiku".into()],
-                embedding_models: vec![],
-                built_in: true,
-            },
-            Provider {
-                id: "gemini".into(),
-                name: "Google Gemini".into(),
-                kind: ProviderKind::Gemini,
-                base_url: "https://generativelanguage.googleapis.com".into(),
-                api_key: String::new(),
-                models: vec!["gemini-2.5-flash".into(), "gemini-2.5-pro".into()],
-                embedding_models: vec!["gemini-embedding-001".into()],
-                built_in: true,
-            },
-        ];
-        let _ = &ollama_url;
-
         Self {
             port: std::env::var("PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(3001),
             data_dir: data_dir.clone(),
-            db_path: data_dir.join("vane.db"),
+            db_path: data_dir.join("libra.db"),
             redis_url: std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
             redis_enabled: std::env::var("REDIS_DISABLED").map(|v| v != "1").unwrap_or(true),
-            static_dir: PathBuf::from(std::env::var("VANE_STATIC_DIR").unwrap_or_else(|_| "web/out".into())),
-            providers,
-            default_model: format!("ollama/{}", "llama3.1:8b"),
-            default_light_model: "ollama/llama3.1:8b".into(),
-            default_rerank_model: "ollama/llama3.1:8b".into(),
-            default_embedding_model: "ollama/nomic-embed-text:latest".into(),
-            default_image_model: "openai/dall-e-3".into(),
+            static_dir: PathBuf::from(std::env::var("LIBRA_STATIC_DIR").unwrap_or_else(|_| "web/out".into())),
+            // Model providers are whatever the user adds in Settings; a fresh instance has none.
+            providers: vec![],
+            default_model: String::new(),
+            default_light_model: String::new(),
+            default_rerank_model: String::new(),
+            default_embedding_model: String::new(),
+            default_image_model: String::new(),
             default_temperature: 0.3,
             search_order_web: vec!["searxng".into(), "brave".into(), "duckduckgo".into(), "html-scrape".into()],
             search_order_news: vec!["searxng".into(), "brave".into(), "duckduckgo".into()],
             search_order_images: vec!["searxng".into(), "brave".into(), "html-scrape".into()],
             search_order_videos: vec!["searxng".into()],
             searxng_url: std::env::var("SEARXNG_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into()),
-            searxng_user: std::env::var("SEARXNG_USER").unwrap_or_else(|_| "vane".into()),
+            searxng_user: std::env::var("SEARXNG_USER").unwrap_or_else(|_| "libra".into()),
             searxng_password: std::env::var("SEARXNG_PASSWORD").unwrap_or_default(),
             brave_api_key: String::new(),
             exa_api_key: String::new(),
@@ -349,19 +288,9 @@ impl Config {
         }
     }
 
+    /// Search and server settings only. Model providers and the models picked from them live in
+    /// settings.json, written from the Settings page.
     fn apply_env(&mut self) {
-        if let Ok(v) = std::env::var("OPENAI_API_KEY") {
-            self.set_key("openai", &v);
-        }
-        if let Ok(v) = std::env::var("OPENROUTER_API_KEY") {
-            self.set_key("openrouter", &v);
-        }
-        if let Ok(v) = std::env::var("ANTHROPIC_API_KEY") {
-            self.set_key("anthropic", &v);
-        }
-        if let Ok(v) = std::env::var("GEMINI_API_KEY").or_else(|_| std::env::var("GOOGLE_GENERATIVE_AI_API_KEY")) {
-            self.set_key("gemini", &v);
-        }
         if let Ok(v) = std::env::var("BRAVE_API_KEY") {
             self.brave_api_key = v;
         }
@@ -373,21 +302,6 @@ impl Config {
         }
         if let Ok(v) = std::env::var("FIRECRAWL_API_KEY") {
             self.firecrawl_api_key = v;
-        }
-        if let Ok(v) = std::env::var("DEFAULT_MODEL") {
-            self.default_model = v;
-        }
-        if let Ok(v) = std::env::var("DEFAULT_LIGHT_MODEL") {
-            self.default_light_model = v;
-        }
-        if let Ok(v) = std::env::var("DEFAULT_RERANK_MODEL") {
-            self.default_rerank_model = v;
-        }
-        if let Ok(v) = std::env::var("DEFAULT_EMBEDDING_MODEL") {
-            self.default_embedding_model = v;
-        }
-        if let Ok(v) = std::env::var("DEFAULT_IMAGE_MODEL") {
-            self.default_image_model = v;
         }
         if let Ok(v) = std::env::var("WEB_SEARCH_NUM_RESULTS") {
             if let Ok(n) = v.parse() {
@@ -408,12 +322,6 @@ impl Config {
         }
     }
 
-    fn set_key(&mut self, id: &str, key: &str) {
-        if let Some(p) = self.providers.iter_mut().find(|p| p.id == id) {
-            p.api_key = key.to_string();
-        }
-    }
-
     pub fn provider(&self, id: &str) -> Option<&Provider> {
         self.providers.iter().find(|p| p.id == id)
     }
@@ -431,6 +339,15 @@ impl Config {
             }
         }
         None
+    }
+
+    /// The model for background chores (titles, suggestions); unset means "same as the answer model".
+    pub fn light_model(&self) -> &str {
+        if self.default_light_model.is_empty() {
+            &self.default_model
+        } else {
+            &self.default_light_model
+        }
     }
 
     pub fn model_options(&self) -> serde_json::Value {
@@ -482,8 +399,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fresh_config_has_no_model_providers() {
+        let cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
+        assert!(cfg.providers.is_empty());
+        assert!(cfg.default_model.is_empty());
+        assert!(cfg.resolve_model("ollama/llama3.1:8b").is_none());
+    }
+
+    #[test]
     fn resolves_slashed_openrouter_models() {
-        let cfg = Config::defaults(&PathBuf::from("/tmp/vane-test"));
+        let mut cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
+        cfg.apply_settings(&serde_json::json!({ "providers": [{
+            "id": "openrouter", "name": "OpenRouter", "type": "open_router",
+            "base_url": "https://openrouter.ai/api/v1", "api_key": "",
+            "models": ["anthropic/claude-3.5-sonnet"]
+        }] }));
         let (p, m) = cfg.resolve_model("openrouter/anthropic/claude-3.5-sonnet").unwrap();
         assert_eq!(p.id, "openrouter");
         assert_eq!(m, "anthropic/claude-3.5-sonnet");
@@ -492,7 +422,7 @@ mod tests {
 
     #[test]
     fn settings_round_trip() {
-        let mut cfg = Config::defaults(&PathBuf::from("/tmp/vane-test"));
+        let mut cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
         let patch = serde_json::json!({ "braveApiKey": "k", "numWebResults": 12, "searchOrder": { "web": ["brave", "searxng"] } });
         cfg.apply_settings(&patch);
         assert_eq!(cfg.brave_api_key, "k");

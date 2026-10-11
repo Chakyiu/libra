@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,vane_next=info,sqlx=warn".into()),
+                .unwrap_or_else(|_| "info,libra=info,sqlx=warn".into()),
         )
         .init();
 
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     let listener = tokio::net::TcpListener::bind(addr.as_str()).await?;
-    tracing::info!("Vane listening on http://{}:{}", cfg.host, cfg.port);
+    tracing::info!("Libra listening on http://{}:{}", cfg.host, cfg.port);
     axum::serve(listener, api::router(app)).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())
 }

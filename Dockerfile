@@ -18,14 +18,14 @@ RUN cargo build --release
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
-COPY --from=build /app/target/release/vane-next /usr/local/bin/vane-next
+COPY --from=build /app/target/release/libra /usr/local/bin/libra
 COPY --from=web /app/web/out /app/web/out
 
 ENV PORT=3001 \
-    VANE_DATA_DIR=/data \
-    VANE_STATIC_DIR=/app/web/out \
-    DATABASE_URL=/data/vane.db \
+    LIBRA_DATA_DIR=/data \
+    LIBRA_STATIC_DIR=/app/web/out \
+    DATABASE_URL=/data/libra.db \
     RUST_LOG=info
 VOLUME /data
 EXPOSE 3001
-CMD ["vane-next"]
+CMD ["libra"]

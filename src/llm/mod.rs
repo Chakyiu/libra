@@ -5,7 +5,7 @@ pub mod openai;
 pub mod sse;
 
 use crate::config::{Config, ProviderKind};
-use crate::error::VaneError;
+use crate::error::LibraError;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -108,15 +108,21 @@ impl Llm {
 }
 
 /// Pick the model for a request from a `provider/model` reference in the config.
-pub fn resolve_chat(cfg: &Config, http: &Client, reference: &str) -> Result<Llm, VaneError> {
+pub fn resolve_chat(cfg: &Config, http: &Client, reference: &str) -> Result<Llm, LibraError> {
+    if reference.is_empty() {
+        return Err(LibraError::NoModel("add a model provider in Settings, then pick an answer model".into()));
+    }
     let (provider, model) = cfg.resolve_model(reference).ok_or_else(|| {
-        VaneError::NoModel(format!("model '{reference}' does not match a configured provider - pick one in Settings"))
+        LibraError::NoModel(format!("model '{reference}' does not match a configured provider - pick one in Settings"))
     })?;
     let base = if provider.base_url.is_empty() { default_base(provider.kind) } else { provider.base_url.clone() };
     Ok(Llm::new(provider.kind, base, &provider.api_key, model, http))
 }
 
-pub fn resolve_embed(cfg: &Config, http: &Client, reference: &str) -> Result<Llm, VaneError> {
+pub fn resolve_embed(cfg: &Config, http: &Client, reference: &str) -> Result<Llm, LibraError> {
+    if reference.is_empty() {
+        return Err(LibraError::NoModel("pick an embedding model in Settings → Answering to read files".into()));
+    }
     resolve_chat(cfg, http, reference)
 }
 
@@ -128,6 +134,20 @@ fn default_base(kind: ProviderKind) -> String {
         ProviderKind::OpenRouter => "https://openrouter.ai/api/v1".into(),
         _ => "http://127.0.0.1:11434/v1".into(),
     }
+}
+
+/// Display plus the source chain. Reqwest reports every body failure as
+/// "error decoding response body" and hides "operation timed out" or the
+/// connection reset underneath.
+pub(crate) fn error_detail(err: &dyn std::error::Error) -> String {
+    let mut out = err.to_string();
+    let mut src = err.source();
+    while let Some(e) = src {
+        out.push_str(": ");
+        out.push_str(&e.to_string());
+        src = e.source();
+    }
+    out
 }
 
 pub(crate) async fn read_error_body(resp: reqwest::Response) -> String {

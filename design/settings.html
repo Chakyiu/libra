@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Libra — Settings</title>
+<link rel="stylesheet" href="libra.css">
+<script>try{var t=localStorage.getItem('libra:theme')||'light';document.documentElement.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;}catch(e){}</script>
+<style>
+  .settings { flex: 1; overflow-y: auto; }
+
+  .settings__inner {
+    display: grid;
+    grid-template-columns: 184px minmax(0, 1fr);
+    gap: 48px;
+    max-width: 58rem;
+    margin: 0 auto;
+    padding: 40px 40px 72px;
+  }
+
+  .settings__nav { position: sticky; top: 0; align-self: start; }
+  .settings__nav ul { list-style: none; margin: 12px 0 0; padding: 0; }
+
+  .settings__nav button {
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 510;
+    letter-spacing: 0.01em;
+    text-align: left;
+    width: 100%;
+    background: none;
+    border: 0;
+    border-left: 2px solid var(--border);
+    color: var(--muted);
+    padding: 8px 0 8px 14px;
+    min-height: 36px;
+    cursor: pointer;
+    transition: color 120ms, border-color 120ms;
+  }
+  .settings__nav button:hover { color: var(--fg); }
+  .settings__nav button[aria-selected='true'] { color: var(--fg); border-left-color: var(--accent); }
+
+  .panel[hidden] { display: none; }
+
+  .panel > header { margin-bottom: 4px; }
+
+  .panel h2 {
+    font-family: var(--font-display);
+    font-size: 26px;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+    margin: 6px 0 8px;
+  }
+
+  .panel header p {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0 0 8px;
+    max-width: 58ch;
+  }
+
+  .srow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px 24px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .srow__label { font-size: 14px; font-weight: 550; letter-spacing: 0.01em; margin: 0 0 3px; }
+  .srow__help { font-size: 12.5px; line-height: 1.5; color: var(--muted); margin: 0; max-width: 52ch; }
+  .srow__control { display: flex; align-items: center; gap: 10px; justify-self: end; }
+
+  .srow--connector { grid-template-columns: 26px minmax(0, 1fr) auto; }
+
+  .conn-icon { color: var(--muted); display: flex; }
+
+  select, input[type='text'], input[type='number'] {
+    font: inherit;
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 7px 10px;
+    min-height: 34px;
+  }
+  select { min-width: 190px; }
+
+  input[type='range'] { accent-color: var(--accent); width: 160px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .seg button {
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 510;
+    letter-spacing: 0.02em;
+    background: var(--surface);
+    border: 0;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+    padding: 7px 13px;
+    min-height: 34px;
+    cursor: pointer;
+    transition: background 120ms, color 120ms;
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { background: var(--sunken); color: var(--fg); }
+  .seg button[aria-pressed='true'] { background: var(--sunken); color: var(--fg); }
+
+  .people { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  .people th {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+    text-align: left;
+    padding: 0 12px 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .people td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; vertical-align: middle; }
+  .people td:last-child, .people th:last-child { padding-right: 0; text-align: right; }
+  .people .who { display: block; font-weight: 550; }
+  .people .mail { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+
+  .token {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.01em;
+    background: var(--sunken);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 9px 11px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .danger { color: var(--accent); }
+
+  @media (max-width: 860px) {
+    .settings__inner { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 28px 20px 56px; }
+    .settings__nav { position: static; }
+    .settings__nav ul { display: flex; gap: 4px; overflow-x: auto; }
+    .settings__nav button { border-left: 0; border-bottom: 2px solid var(--border); padding: 8px 10px; white-space: nowrap; }
+    .settings__nav button[aria-selected='true'] { border-bottom-color: var(--accent); }
+    .srow { grid-template-columns: minmax(0, 1fr); }
+    .srow__control { justify-self: start; }
+    .srow--connector { grid-template-columns: 26px minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" data-sidebar="expanded" data-od-id="app-shell">
+
+  <aside class="sidebar" data-od-id="thread-sidebar">
+    <div class="sidebar__head">
+      <a class="wordmark" href="home.html" data-od-id="wordmark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.5v16.5M7.5 20h9M4 7.5h16"/>
+          <path d="M4 7.5 1.4 13.5h5.2L4 7.5Z"/>
+          <path d="M20 7.5l-2.6 6h5.2L20 7.5Z"/>
+        </svg>
+        <b>Libra</b>
+      </a>
+      <button class="btn btn--quiet btn--icon" data-sidebar-toggle aria-expanded="true" aria-label="Hide threads" title="Hide threads  [">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16"/></svg>
+      </button>
+    </div>
+
+    <a class="btn sidebar__new" href="home.html" data-od-id="new-thread">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      New thread
+      <span class="kbd" style="margin-left:auto">N</span>
+    </a>
+
+    <div class="sidebar__scroll">
+      <p class="kicker sidebar__group">Today</p>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-firecracker">
+        <span>What changed in Firecracker microVM cold-start performance this year?</span>
+        <em>6 sources · 11:04</em>
+      </a>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-uffd">
+        <span>Does UFFD restore warm the host page cache?</span>
+        <em>4 sources · 09:51</em>
+      </a>
+      <p class="kicker sidebar__group">Yesterday</p>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-guest-kernel">
+        <span>Which guest kernel ships in our base rootfs image?</span>
+        <em>3 sources · 17:22</em>
+      </a>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-vhost">
+        <span>Can we snapshot a VM with a vhost-user block device attached?</span>
+        <em>5 sources · 15:40</em>
+      </a>
+    </div>
+
+    <div class="sidebar__foot">
+      <span class="meta"><span class="dot"></span> Index healthy</span>
+      <a class="btn btn--quiet btn--icon" href="settings.html" aria-label="Settings" title="Settings" data-od-id="sidebar-settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+      </a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar" data-od-id="topbar">
+      <button class="btn btn--quiet btn--icon" data-sidebar-toggle aria-expanded="true" aria-label="Toggle threads">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16"/></svg>
+      </button>
+      <span class="topbar__title">Settings</span>
+      <span class="topbar__spacer"></span>
+      <span class="meta">libra.internal · v0.9.2</span>
+      <button class="btn btn--quiet" data-theme-toggle data-od-id="theme-toggle">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" data-theme-icon="light"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4 16.9 7.1M7.1 16.9 5.4 18.6M18.6 18.6 16.9 16.9M7.1 7.1 5.4 5.4" stroke-linecap="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" data-theme-icon="dark" hidden><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z" stroke-linejoin="round"/></svg>
+        <span data-theme-label>Light</span>
+      </button>
+    </div>
+
+    <div class="settings" data-od-id="settings">
+      <div class="settings__inner">
+
+        <nav class="settings__nav" data-od-id="settings-nav" role="tablist" aria-orientation="vertical">
+          <p class="kicker">Instance</p>
+          <ul>
+            <li><button role="tab" aria-selected="true" data-tab="connectors" data-od-id="tab-connectors">Index &amp; connectors</button></li>
+            <li><button role="tab" aria-selected="false" data-tab="answering" data-od-id="tab-answering">Answering</button></li>
+            <li><button role="tab" aria-selected="false" data-tab="appearance" data-od-id="tab-appearance">Reading &amp; appearance</button></li>
+            <li><button role="tab" aria-selected="false" data-tab="access" data-od-id="tab-access">Access &amp; retention</button></li>
+          </ul>
+        </nav>
+
+        <div>
+          <!-- ── connectors ── -->
+          <section class="panel" id="panel-connectors" role="tabpanel" data-od-id="panel-connectors">
+            <header>
+              <p class="kicker">41,208 documents · last sync 14m ago</p>
+              <h2>Index &amp; connectors</h2>
+              <p>Libra only answers from what you let it index. Everything below runs on this host — nothing is sent to a third party unless you add a remote model.</p>
+            </header>
+
+            <div class="srow srow--connector" data-od-id="connector-web">
+              <span class="conn-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.2 9h17.6M3.2 15h17.6M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>
+              <div>
+                <p class="srow__label">Public web pages</p>
+                <p class="srow__help">Allowlisted domains, crawled nightly. 18,440 pages · 412 excluded by robots.</p>
+              </div>
+              <div class="srow__control">
+                <button class="btn btn--quiet">Re-crawl</button>
+                <input class="switch" type="checkbox" checked aria-label="Enable web connector">
+              </div>
+            </div>
+
+            <div class="srow srow--connector" data-od-id="connector-docs">
+              <span class="conn-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5h9l5 5V19a.5.5 0 0 1-.5.5h-13A.5.5 0 0 1 5 19V4.5Z"/><path d="M14 4.5V10h5M8.5 14h7M8.5 17h4.5"/></svg></span>
+              <div>
+                <p class="srow__label">Internal docs &amp; wiki</p>
+                <p class="srow__help">wiki.internal · syncs every 15 minutes. Honours page-level ACLs at query time, not at index time.</p>
+              </div>
+              <div class="srow__control">
+                <button class="btn btn--quiet">Re-sync</button>
+                <input class="switch" type="checkbox" checked aria-label="Enable internal docs connector">
+              </div>
+            </div>
+
+            <div class="srow srow--connector" data-od-id="connector-code">
+              <span class="conn-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 8-5 4 5 4M15 8l5 4-5 4"/></svg></span>
+              <div>
+                <p class="srow__label">Code repositories</p>
+                <p class="srow__help">41 repos on the default branch. Indexes READMEs, docs/, CHANGELOGs, and top-level comments — not full source bodies.</p>
+              </div>
+              <div class="srow__control">
+                <button class="btn btn--quiet">Re-index</button>
+                <input class="switch" type="checkbox" checked aria-label="Enable code connector">
+              </div>
+            </div>
+
+            <div class="srow srow--connector" data-od-id="connector-archive">
+              <span class="conn-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="4"/><path d="M5 8.5V19a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V8.5M10 12.5h4"/></svg></span>
+              <div>
+                <p class="srow__label">Archived spaces</p>
+                <p class="srow__help">Deprecated wiki spaces. Off by default — answers drawn from here are often two reorgs out of date.</p>
+              </div>
+              <div class="srow__control">
+                <button class="btn btn--quiet" disabled>Re-sync</button>
+                <input class="switch" type="checkbox" aria-label="Enable archived connector">
+              </div>
+            </div>
+
+            <div class="srow" style="border-bottom:1px solid var(--border)">
+              <div>
+                <p class="srow__label">Add a connector</p>
+                <p class="srow__help">S3 buckets, Git hosts, Confluence, or anything that speaks the Libra ingest API.</p>
+              </div>
+              <div class="srow__control"><button class="btn" data-od-id="add-connector">Add connector</button></div>
+            </div>
+          </section>
+
+          <!-- ── answering ── -->
+          <section class="panel" id="panel-answering" role="tabpanel" hidden data-od-id="panel-answering">
+            <header>
+              <p class="kicker">Generation</p>
+              <h2>Answering</h2>
+              <p>How Libra writes. The citation rules are the ones worth arguing about — everything else is taste.</p>
+            </header>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Model</p>
+                <p class="srow__help">Served from this host. Adding a remote model moves question text off your network.</p>
+              </div>
+              <div class="srow__control">
+                <select aria-label="Model">
+                  <option>local · llama-3.3-70b</option>
+                  <option>local · mistral-small-3</option>
+                  <option>local · qwen-2.5-32b</option>
+                  <option>remote · configure endpoint…</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Require a citation for every claim</p>
+                <p class="srow__help">Sentences the model can't attribute are dropped before the answer streams. Slower, and the reason this instance exists.</p>
+              </div>
+              <div class="srow__control"><input class="switch" type="checkbox" checked aria-label="Require a citation for every claim"></div>
+            </div>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Flag disagreement between sources</p>
+                <p class="srow__help">When two indexed sources conflict, say so in the answer instead of silently picking the higher-ranked one.</p>
+              </div>
+              <div class="srow__control"><input class="switch" type="checkbox" checked aria-label="Flag disagreement between sources"></div>
+            </div>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Sources retrieved per question</p>
+                <p class="srow__help">More sources widen coverage and lengthen the answer. <span id="srcN">6</span> currently.</p>
+              </div>
+              <div class="srow__control">
+                <input type="range" min="3" max="12" value="6" aria-label="Sources per question" oninput="document.getElementById('srcN').textContent=this.value">
+              </div>
+            </div>
+
+            <div class="srow" style="border-bottom:1px solid var(--border)">
+              <div>
+                <p class="srow__label">Answer length</p>
+                <p class="srow__help">A ceiling, not a target — short questions still get short answers.</p>
+              </div>
+              <div class="srow__control">
+                <div class="seg" data-seg>
+                  <button type="button" aria-pressed="false">Brief</button>
+                  <button type="button" aria-pressed="true">Standard</button>
+                  <button type="button" aria-pressed="false">Thorough</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── appearance ── -->
+          <section class="panel" id="panel-appearance" role="tabpanel" hidden data-od-id="panel-appearance">
+            <header>
+              <p class="kicker">This browser only</p>
+              <h2>Reading &amp; appearance</h2>
+              <p>Libra is a reading tool before it is a chat tool. These settings apply live — switch tabs and look at an answer.</p>
+            </header>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Theme</p>
+                <p class="srow__help">Light is the default; dark keeps the same paper-and-ink contrast ratios.</p>
+              </div>
+              <div class="srow__control">
+                <div class="seg" id="themeSeg">
+                  <button type="button" data-mode="light" aria-pressed="true">Light</button>
+                  <button type="button" data-mode="dark" aria-pressed="false">Dark</button>
+                  <button type="button" data-mode="system" aria-pressed="false">System</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Answer column width</p>
+                <p class="srow__help">Measured in characters per line. Narrower reads faster; wider fits more code. <span id="colN">34</span>rem.</p>
+              </div>
+              <div class="srow__control">
+                <input type="range" id="colW" min="28" max="46" value="34" aria-label="Answer column width">
+              </div>
+            </div>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Answer typeface</p>
+                <p class="srow__help">Serif for long prose, sans if you mostly read short factual answers.</p>
+              </div>
+              <div class="srow__control">
+                <div class="seg" id="faceSeg">
+                  <button type="button" data-face="serif" aria-pressed="true">Serif</button>
+                  <button type="button" data-face="sans" aria-pressed="false">Sans</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="srow" style="border-bottom:1px solid var(--border)">
+              <div>
+                <p class="srow__label">Open the sources rail by default</p>
+                <p class="srow__help">On narrow windows the rail becomes a sheet you pull up from the bottom.</p>
+              </div>
+              <div class="srow__control"><input class="switch" type="checkbox" checked aria-label="Open the sources rail by default"></div>
+            </div>
+
+            <p class="meta" style="margin-top:16px">Preview: the answer column below uses your current settings.</p>
+            <div style="border:1px solid var(--border);border-radius:3px;padding:18px 20px;margin-top:8px;background:var(--surface)">
+              <p class="answer" style="margin:0;max-width:none">Restore time stops scaling with the guest's configured memory and starts scaling with its working set.<a class="cite" data-ref="3" href="#">3</a></p>
+            </div>
+          </section>
+
+          <!-- ── access ── -->
+          <section class="panel" id="panel-access" role="tabpanel" hidden data-od-id="panel-access">
+            <header>
+              <p class="kicker">7 people · 2 service tokens</p>
+              <h2>Access &amp; retention</h2>
+              <p>Membership is mirrored from your identity provider. Document permissions are enforced per question, so two people can ask the same thing and get different sources.</p>
+            </header>
+
+            <table class="people" data-od-id="people-table">
+              <thead><tr><th scope="col">Person</th><th scope="col">Role</th><th scope="col">Last asked</th><th scope="col"></th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><span class="who">Dana Reyes</span><span class="mail">dana@runtime.internal</span></td>
+                  <td>Owner</td><td class="meta">11:04 today</td>
+                  <td><button class="btn btn--quiet" disabled>Manage</button></td>
+                </tr>
+                <tr>
+                  <td><span class="who">Theo Lindqvist</span><span class="mail">theo@runtime.internal</span></td>
+                  <td>Admin</td><td class="meta">09:12 today</td>
+                  <td><button class="btn btn--quiet">Manage</button></td>
+                </tr>
+                <tr>
+                  <td><span class="who">Priya Raman</span><span class="mail">priya@runtime.internal</span></td>
+                  <td>Member</td><td class="meta">Yesterday</td>
+                  <td><button class="btn btn--quiet">Manage</button></td>
+                </tr>
+                <tr>
+                  <td><span class="who">ci-bot</span><span class="mail">service token · read-only</span></td>
+                  <td>Service</td><td class="meta">4m ago</td>
+                  <td><button class="btn btn--quiet">Manage</button></td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="srow" style="margin-top:8px">
+              <div>
+                <p class="srow__label">Keep answer logs for</p>
+                <p class="srow__help">Questions and the sources they touched. Clearing logs does not touch the index.</p>
+              </div>
+              <div class="srow__control">
+                <select aria-label="Retention period">
+                  <option>30 days</option><option selected>90 days</option><option>1 year</option><option>Until deleted</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="srow">
+              <div>
+                <p class="srow__label">Ingest API token</p>
+                <p class="srow__help">Used by connectors pushing documents in. Rotating invalidates the old token immediately.</p>
+              </div>
+              <div class="srow__control">
+                <span class="token">lbr_sk_••••••••••••••••7c2a</span>
+                <button class="btn btn--quiet">Rotate</button>
+              </div>
+            </div>
+
+            <div class="srow" style="border-bottom:1px solid var(--border)">
+              <div>
+                <p class="srow__label danger">Delete all answer logs</p>
+                <p class="srow__help">Removes every thread for every member on this instance. The index and connectors stay as they are.</p>
+              </div>
+              <div class="srow__control"><button class="btn" data-od-id="delete-logs">Delete logs…</button></div>
+            </div>
+          </section>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="libra.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* tabs */
+  var tabs = document.querySelectorAll('.settings__nav button');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) { t.setAttribute('aria-selected', String(t === tab)); });
+      document.querySelectorAll('.panel').forEach(function (p) {
+        p.hidden = p.id !== 'panel-' + tab.dataset.tab;
+      });
+    });
+  });
+
+  /* generic segmented controls */
+  document.querySelectorAll('[data-seg]').forEach(function (seg) {
+    seg.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      seg.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+    });
+  });
+
+  /* theme — writes through the shared store so every screen follows */
+  var themeSeg = document.getElementById('themeSeg');
+  function syncThemeSeg() {
+    var pref = document.documentElement.dataset.themePref || 'light';
+    themeSeg.querySelectorAll('button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.mode === pref));
+    });
+  }
+  themeSeg.addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    window.LibraTheme.set(b.dataset.mode);
+    syncThemeSeg();
+  });
+  document.addEventListener('DOMContentLoaded', syncThemeSeg);
+
+  /* live reading controls */
+  var colW = document.getElementById('colW');
+  colW.addEventListener('input', function () {
+    document.documentElement.style.setProperty('--col', this.value + 'rem');
+    document.getElementById('colN').textContent = this.value;
+  });
+
+  var faceSeg = document.getElementById('faceSeg');
+  faceSeg.addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    faceSeg.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+    document.querySelectorAll('.answer').forEach(function (a) {
+      a.style.fontFamily = b.dataset.face === 'sans' ? 'var(--font-body)' : 'var(--font-display)';
+      a.style.fontSize = b.dataset.face === 'sans' ? '16px' : '';
+    });
+  });
+})();
+</script>
+</body>
+</html>

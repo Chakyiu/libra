@@ -1,11 +1,11 @@
 //! Search-box autocomplete via DuckDuckGo's suggestion endpoint (keyless), like upstream.
 
 use crate::config::Config;
-use crate::error::VaneError;
+use crate::error::LibraError;
 use reqwest::Client;
 use serde_json::Value;
 
-pub async fn suggestions(http: &Client, cfg: &Config, query: &str) -> Result<Vec<String>, VaneError> {
+pub async fn suggestions(http: &Client, cfg: &Config, query: &str) -> Result<Vec<String>, LibraError> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
@@ -19,18 +19,18 @@ pub async fn suggestions(http: &Client, cfg: &Config, query: &str) -> Result<Vec
         .header("user-agent", "Mozilla/5.0 (X11; Linux x86_64)")
         .send()
         .await
-        .map_err(|e| VaneError::Provider {
+        .map_err(|e| LibraError::Provider {
             provider: "duckduckgo-suggest".into(),
             message: e.to_string(),
         })?
         .error_for_status()
-        .map_err(|e| VaneError::Provider {
+        .map_err(|e| LibraError::Provider {
             provider: "duckduckgo-suggest".into(),
             message: e.to_string(),
         })?
         .json()
         .await
-        .map_err(|e| VaneError::Provider {
+        .map_err(|e| LibraError::Provider {
             provider: "duckduckgo-suggest".into(),
             message: e.to_string(),
         })?;

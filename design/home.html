@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Libra — Ask</title>
+<link rel="stylesheet" href="libra.css">
+<script>try{var t=localStorage.getItem('libra:theme')||'light';document.documentElement.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;}catch(e){}</script>
+<style>
+  .home {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .home__center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 56px 32px 40px;
+    min-height: 0;
+  }
+
+  .hero { width: 100%; max-width: 40rem; text-align: center; }
+
+  .hero__mark { display: inline-flex; align-items: center; gap: 12px; color: var(--accent); }
+
+  .hero h1 {
+    font-family: var(--font-display);
+    font-size: 54px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+    margin: 14px 0 0;
+    color: var(--fg);
+  }
+
+  .hero__sub {
+    font-family: var(--font-display);
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--muted);
+    margin: 14px auto 0;
+    max-width: 36ch;
+    text-wrap: balance;
+  }
+
+  /* the ask box */
+  .askbox { margin-top: 36px; text-align: left; }
+
+  .askbox__field {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid color-mix(in oklch, var(--border) 55%, var(--fg) 18%);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 14px 14px 14px 18px;
+    transition: border-color 150ms;
+  }
+
+  .askbox__field:focus-within { border-color: color-mix(in oklch, var(--accent) 60%, var(--border)); }
+
+  .askbox textarea {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-display);
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--fg);
+    background: none;
+    border: 0;
+    resize: none;
+    height: 54px;
+    padding: 0;
+  }
+  .askbox textarea:focus { outline: none; }
+  .askbox textarea::placeholder { color: var(--muted); }
+
+  .askbox__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+  }
+
+  .askbox__hint { display: flex; align-items: center; gap: 6px; }
+
+  /* starters */
+  .starters { margin-top: 34px; text-align: left; }
+  .starters ul { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--border); }
+  .starters li { border-bottom: 1px solid var(--border); }
+
+  .starters a {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 11px 2px;
+    text-decoration: none;
+    transition: padding-left 140ms ease, background 140ms;
+  }
+  .starters a:hover { padding-left: 8px; background: var(--sunken); }
+
+  .starters a span {
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--fg);
+    flex: 1;
+  }
+
+  /* index status strip */
+  .status {
+    flex: none;
+    border-top: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px 22px;
+    flex-wrap: wrap;
+    background: var(--sunken);
+  }
+
+  .status__item { display: inline-flex; align-items: center; gap: 7px; }
+
+  @media (max-width: 760px) {
+    .hero h1 { font-size: 40px; }
+    .hero__sub { font-size: 16px; }
+    .home__center { padding: 36px 20px 28px; }
+    .askbox textarea { font-size: 16.5px; height: 48px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" data-sidebar="expanded" data-od-id="app-shell">
+
+  <!-- ───────── thread sidebar ───────── -->
+  <aside class="sidebar" data-od-id="thread-sidebar">
+    <div class="sidebar__head">
+      <a class="wordmark" href="home.html" data-od-id="wordmark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.5v16.5M7.5 20h9M4 7.5h16"/>
+          <path d="M4 7.5 1.4 13.5h5.2L4 7.5Z"/>
+          <path d="M20 7.5l-2.6 6h5.2L20 7.5Z"/>
+        </svg>
+        <b>Libra</b>
+      </a>
+      <button class="btn btn--quiet btn--icon" data-sidebar-toggle aria-expanded="true" aria-label="Hide threads" title="Hide threads  [">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16"/></svg>
+      </button>
+    </div>
+
+    <button class="btn sidebar__new" data-od-id="new-thread">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      New thread
+      <span class="kbd" style="margin-left:auto">N</span>
+    </button>
+
+    <div class="sidebar__scroll">
+      <p class="kicker sidebar__group">Today</p>
+      <a class="thread" href="answer-complete.html" aria-current="page" data-od-id="thread-firecracker">
+        <span>What changed in Firecracker microVM cold-start performance this year?</span>
+        <em>6 sources · 11:04</em>
+      </a>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-uffd">
+        <span>Does UFFD restore warm the host page cache?</span>
+        <em>4 sources · 09:51</em>
+      </a>
+
+      <p class="kicker sidebar__group">Yesterday</p>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-guest-kernel">
+        <span>Which guest kernel ships in our base rootfs image?</span>
+        <em>3 sources · 17:22</em>
+      </a>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-vhost">
+        <span>Can we snapshot a VM with a vhost-user block device attached?</span>
+        <em>5 sources · 15:40</em>
+      </a>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-jailer">
+        <span>What does the jailer actually chroot, step by step?</span>
+        <em>7 sources · 11:18</em>
+      </a>
+
+      <p class="kicker sidebar__group">Last week</p>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-retention">
+        <span>Retention policy for answer logs under the new DPA</span>
+        <em>2 sources · Tue</em>
+      </a>
+      <a class="thread" href="answer-complete.html" data-od-id="thread-oncall">
+        <span>Who owns the runtime on-call rotation in Q4?</span>
+        <em>3 sources · Mon</em>
+      </a>
+    </div>
+
+    <div class="sidebar__foot">
+      <span class="meta"><span class="dot"></span> Index healthy</span>
+      <a class="btn btn--quiet btn--icon" href="settings.html" aria-label="Settings" title="Settings" data-od-id="sidebar-settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+      </a>
+    </div>
+  </aside>
+
+  <!-- ───────── main ───────── -->
+  <main class="main">
+    <div class="topbar" data-od-id="topbar">
+      <button class="btn btn--quiet btn--icon" data-sidebar-toggle aria-expanded="true" aria-label="Toggle threads">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16"/></svg>
+      </button>
+      <span class="meta">libra.internal</span>
+      <span class="topbar__spacer"></span>
+      <button class="btn btn--quiet" data-theme-toggle data-od-id="theme-toggle">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" data-theme-icon="light"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4 16.9 7.1M7.1 16.9 5.4 18.6M18.6 18.6 16.9 16.9M7.1 7.1 5.4 5.4" stroke-linecap="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" data-theme-icon="dark" hidden><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z" stroke-linejoin="round"/></svg>
+        <span data-theme-label>Light</span>
+      </button>
+      <a class="btn btn--quiet" href="settings.html" data-od-id="topbar-settings">Settings</a>
+    </div>
+
+    <div class="home" data-od-id="home">
+      <div class="home__center">
+        <div class="hero" data-od-id="hero">
+          <span class="hero__mark">
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3.5v16.5M7.5 20h9M4 7.5h16"/>
+              <path d="M4 7.5 1.4 13.5h5.2L4 7.5Z"/>
+              <path d="M20 7.5l-2.6 6h5.2L20 7.5Z"/>
+              <circle cx="12" cy="4.6" r="1.1" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <h1 data-od-id="hero-title">Libra</h1>
+          <p class="hero__sub">Every sentence carries its source. Ask across your web index, your wiki, and your repositories — on your own hardware.</p>
+
+          <form class="askbox" data-od-id="ask-box" onsubmit="event.preventDefault();window.location.href='answer-streaming.html';">
+            <div class="askbox__field">
+              <textarea data-ask-input rows="2" placeholder="Ask anything your index can answer…" aria-label="Your question">What changed in Firecracker microVM cold-start performance this year?</textarea>
+              <button class="btn btn--primary" type="submit" data-od-id="ask-submit">
+                Ask
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M12 5.5 18.5 12 12 18.5"/></svg>
+              </button>
+            </div>
+
+            <div class="askbox__bar">
+              <div class="chips" data-od-id="scope-chips">
+                <button class="chip" type="button" aria-pressed="true" onclick="toggleScope(this)"><i class="chip__led"></i>Web</button>
+                <button class="chip" type="button" aria-pressed="true" onclick="toggleScope(this)"><i class="chip__led"></i>Internal docs</button>
+                <button class="chip" type="button" aria-pressed="true" onclick="toggleScope(this)"><i class="chip__led"></i>Code</button>
+                <button class="chip" type="button" aria-pressed="false" onclick="toggleScope(this)"><i class="chip__led"></i>Archived</button>
+              </div>
+              <span class="askbox__hint meta"><span class="kbd">↵</span> to ask · <span class="kbd">⇧↵</span> newline</span>
+            </div>
+          </form>
+
+          <section class="starters" data-od-id="recent-questions">
+            <p class="kicker">Picked up where the team left off</p>
+            <ul>
+              <li><a href="answer-complete.html" data-od-id="starter-uffd"><span>Does UFFD restore warm the host page cache?</span><em class="meta">4 sources</em></a></li>
+              <li><a href="answer-complete.html" data-od-id="starter-budget"><span>Where does our cold-start budget actually go?</span><em class="meta">6 sources</em></a></li>
+              <li><a href="answer-complete.html" data-od-id="starter-snapshot"><span>Snapshot compatibility rules across Firecracker minor versions</span><em class="meta">5 sources</em></a></li>
+            </ul>
+          </section>
+        </div>
+      </div>
+
+      <div class="status" data-od-id="index-status">
+        <span class="status__item meta"><span class="dot"></span> Connectors 3 of 3 online</span>
+        <span class="status__item meta">41,208 documents indexed</span>
+        <span class="status__item meta">Last sync 14m ago</span>
+        <span class="status__item meta">Model: local · llama-3.3-70b</span>
+        <span class="topbar__spacer"></span>
+        <span class="status__item meta">v0.9.2 · self-hosted</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="libra.js"></script>
+<script>
+  function toggleScope(btn) {
+    btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+  }
+  document.querySelector('[data-ask-input]').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      window.location.href = 'answer-streaming.html';
+    }
+  });
+</script>
+</body>
+</html>

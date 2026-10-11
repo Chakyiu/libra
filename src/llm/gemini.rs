@@ -72,14 +72,22 @@ pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: Chat
         }
         let mut parser = sse::SseParser::new();
         let mut stream = resp.bytes_stream();
+        let mut completed = false;
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    for data in parser.push(&bytes) {
+                    let batch = parser.push(&bytes);
+                    for data in batch.data {
                         let Ok(v) = serde_json::from_str::<Value>(&data) else { continue };
                         if let Some(err) = v.pointer("/error/message").and_then(|e| e.as_str()) {
                             let _ = tx.send(Delta::Error(err.to_string()));
                             return;
+                        }
+                        if v.pointer("/candidates/0/finishReason")
+                            .and_then(|r| r.as_str())
+                            .is_some_and(|s| !s.is_empty())
+                        {
+                            completed = true;
                         }
                         if let Some(parts) = v.pointer("/candidates/0/content/parts").and_then(|p| p.as_array()) {
                             for p in parts {
@@ -91,9 +99,15 @@ pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: Chat
                             }
                         }
                     }
+                    if batch.done {
+                        return;
+                    }
                 }
                 Err(e) => {
-                    let _ = tx.send(Delta::Error(format!("stream read failed: {e}")));
+                    if completed {
+                        return;
+                    }
+                    let _ = tx.send(Delta::Error(format!("stream read failed: {}", error_detail(&e))));
                     return;
                 }
             }

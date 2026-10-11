@@ -1,0 +1,101 @@
+/* ─── home: the ask ──────────────────────────────────────── */
+
+.home {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.home__center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 56px 32px 40px;
+  min-height: 0;
+}
+
+.hero { width: 100%; max-width: 40rem; text-align: center; }
+
+.hero__mark { display: inline-flex; align-items: center; gap: 12px; color: var(--accent); }
+
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: 54px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+  margin: 14px 0 0;
+  color: var(--fg);
+}
+
+.hero__sub {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 14px auto 0;
+  max-width: 36ch;
+  text-wrap: balance;
+}
+
+.home__setup { margin: 26px 0 0; text-align: left; }
+
+/* starters */
+.starters { margin-top: 34px; text-align: left; }
+.starters ul { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--border); }
+.starters li { border-bottom: 1px solid var(--border); }
+
+.starters a,
+.starters button {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  width: 100%;
+  padding: 11px 2px;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: padding-left 140ms ease, background 140ms;
+}
+.starters a:hover,
+.starters button:hover { padding-left: 8px; background: var(--sunken); }
+
+.starters a span,
+.starters button span {
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--fg);
+  flex: 1;
+  min-width: 0;
+}
+
+.starters em { flex: none; }
+
+/* instance status strip */
+.status {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px 22px;
+  flex-wrap: wrap;
+  background: var(--sunken);
+}
+
+.status__item { display: inline-flex; align-items: center; gap: 7px; }
+
+@media (max-width: 760px) {
+  .hero h1 { font-size: 40px; }
+  .hero__sub { font-size: 16px; }
+  .home__center { padding: 36px 20px 28px; }
+  .status { padding: 10px 20px; gap: 6px 16px; }
+}

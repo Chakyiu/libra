@@ -1,4 +1,4 @@
-//! SSE event envelope. Compact names match upstream Vane's stream protocol:
+//! SSE event envelope. Compact names match the original project's stream protocol:
 //! id / answer chunk / block / close (+ error message on close).
 
 use crate::blocks::Block;
@@ -49,9 +49,14 @@ pub struct App {
 impl App {
     pub fn new(settings: SettingsHandle, db: Arc<Db>, cache: Cache) -> anyhow::Result<Self> {
         let cfg = settings.get();
+        // Stall timeout, not a cap on how long an answer may stream. Reqwest's
+        // total timeout runs until the body ends, so a 120s deadline was aborting
+        // long answers as "error decoding response body".
+        let stall = std::time::Duration::from_secs(cfg.request_timeout_secs.max(1));
         let http = Client::builder()
-            .user_agent("vane-next/0.1 (+self-hosted answer engine)")
-            .timeout(std::time::Duration::from_secs(cfg.request_timeout_secs))
+            .user_agent("libra/0.1 (+self-hosted answer engine)")
+            .connect_timeout(stall.min(std::time::Duration::from_secs(30)))
+            .read_timeout(stall)
             .tcp_nodelay(true)
             .pool_max_idle_per_host(16)
             .build()?;

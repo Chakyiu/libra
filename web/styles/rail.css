@@ -1,0 +1,223 @@
+/* ─── sources rail ───────────────────────────────────────── */
+
+.rail {
+  border-left: 1px solid var(--border);
+  background: var(--sunken);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rail__head {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+}
+
+.rail__headline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rail__for {
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: var(--muted);
+  margin: -3px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail__scroll { overflow-y: auto; flex: 1; padding-bottom: 24px; position: relative; }
+
+.rail__empty {
+  padding: 24px 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+}
+.rail__empty b { color: var(--fg); font-weight: 550; }
+
+.source {
+  display: block;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  scroll-margin-top: 8px;
+  transition: background 140ms, box-shadow 140ms;
+  position: relative;
+}
+
+.source::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: -1px;
+  width: 2px;
+  background: transparent;
+  transition: background 140ms;
+}
+
+.source:hover { background: var(--surface); }
+
+.source.is-lit { background: var(--surface); }
+.source.is-lit::before { background: var(--accent); }
+
+.source__top {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 5px;
+}
+
+.source__n {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  flex: none;
+  min-width: 14px;
+}
+
+.source.is-lit .source__n { color: var(--accent); }
+
+.source__title {
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--fg);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.source__snip {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 8px 23px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.source__foot {
+  margin-left: 23px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.source__domain {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.skeleton { padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.skeleton i {
+  display: block;
+  height: 9px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--border), color-mix(in oklch, var(--border) 45%, var(--sunken)), var(--border));
+  background-size: 220% 100%;
+  animation: shimmer 1.4s linear infinite;
+  margin-bottom: 7px;
+}
+.skeleton i:nth-child(2) { width: 72%; }
+.skeleton i:nth-child(3) { width: 45%; }
+
+@keyframes shimmer { to { background-position: -220% 0; } }
+
+/* ─── narrow windows: the rail folds into a sheet ────────── */
+
+.sources-pill {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  transform: translateX(-50%);
+  z-index: 3;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 15px;
+  border-radius: 18px;
+  color: var(--bg);
+  background: var(--fg);
+  border: 0;
+  box-shadow: 0 2px 10px color-mix(in oklch, var(--fg) 22%, transparent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sources-pill b { font-family: var(--font-mono); font-size: 11px; font-weight: 400; opacity: 0.75; }
+
+.sheet-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  background: color-mix(in oklch, var(--fg) 26%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms;
+}
+.sheet-scrim.is-on { opacity: 1; pointer-events: auto; }
+
+.sheet {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 15;
+  height: calc(100% - var(--topbar-h));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -6px 26px color-mix(in oklch, var(--fg) 14%, transparent);
+  transform: translateY(calc(100% + 40px));
+  transition: transform 280ms cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+.sheet[data-state='half'] { transform: translateY(46%); }
+.sheet[data-state='full'] { transform: translateY(0); }
+.sheet.is-dragging { transition: none; }
+
+.sheet__grab {
+  padding: 10px 0 6px;
+  display: flex;
+  justify-content: center;
+  cursor: grab;
+  flex: none;
+  touch-action: none;
+  background: none;
+  border: 0;
+  width: 100%;
+}
+.sheet__grab i { width: 34px; height: 4px; border-radius: 2px; background: var(--border); display: block; }
+
+.sheet .rail__head { padding: 4px 18px 12px; }
+.sheet .rail__scroll { -webkit-overflow-scrolling: touch; padding-bottom: 28px; }
+/* at half height the lower part of the list sits off-screen; let it scroll up into view */
+.sheet[data-state='half'] .rail__scroll { padding-bottom: calc((100dvh - var(--topbar-h)) * 0.46 + 28px); }
+.sheet .source { background: var(--surface); }
+.sheet .source:hover,
+.sheet .source.is-lit { background: var(--sunken); }

@@ -1,18 +1,18 @@
 //! Image generation (optional) — image/video *search* lives in `search`, this is generation.
 
 use crate::config::Config;
-use crate::error::VaneError;
+use crate::error::LibraError;
 use crate::config::ProviderKind;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-pub async fn generate(http: &Client, cfg: &Config, prompt: &str) -> Result<Value, VaneError> {
+pub async fn generate(http: &Client, cfg: &Config, prompt: &str) -> Result<Value, LibraError> {
     if !cfg.image_generation_enabled {
-        return Err(VaneError::BadRequest("image generation is disabled".into()));
+        return Err(LibraError::BadRequest("image generation is disabled".into()));
     }
     let llm = crate::llm::resolve_chat(cfg, http, &cfg.default_image_model)?;
     if llm.kind != ProviderKind::OpenAi {
-        return Err(VaneError::BadRequest(
+        return Err(LibraError::BadRequest(
             "image generation needs an OpenAI-compatible provider with /images/generations".into(),
         ));
     }
@@ -28,17 +28,17 @@ pub async fn generate(http: &Client, cfg: &Config, prompt: &str) -> Result<Value
         }))
         .send()
         .await
-        .map_err(|e| VaneError::Provider {
+        .map_err(|e| LibraError::Provider {
             provider: cfg.default_image_model.clone(),
             message: e.to_string(),
         })?;
     if !resp.status().is_success() {
-        return Err(VaneError::Provider {
+        return Err(LibraError::Provider {
             provider: cfg.default_image_model.clone(),
             message: resp.text().await.unwrap_or_default(),
         });
     }
-    let v: Value = resp.json().await.map_err(|e| VaneError::Provider {
+    let v: Value = resp.json().await.map_err(|e| LibraError::Provider {
         provider: cfg.default_image_model.clone(),
         message: e.to_string(),
     })?;

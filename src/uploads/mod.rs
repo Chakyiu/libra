@@ -5,7 +5,7 @@
 use crate::cache::Cache;
 use crate::config::SettingsHandle;
 use crate::db::Db;
-use crate::error::VaneError;
+use crate::error::LibraError;
 use crate::llm;
 use reqwest::Client;
 use std::sync::Arc;
@@ -34,12 +34,12 @@ impl UploadStore {
     }
 
     /// Extract, chunk and embed a file; returns the number of chunks stored.
-    pub async fn ingest(&self, chat_id: &str, file_id: &str, filename: &str, bytes: &[u8]) -> Result<usize, VaneError> {
+    pub async fn ingest(&self, chat_id: &str, file_id: &str, filename: &str, bytes: &[u8]) -> Result<usize, LibraError> {
         let cfg = self.cfg.get();
         let text = extract_text(filename, bytes);
         let chunks = split_text(&text);
         if chunks.is_empty() {
-            return Err(VaneError::BadRequest(format!(
+            return Err(LibraError::BadRequest(format!(
                 "no readable text found in {filename} (supported: txt, md, csv, pdf, docx)"
             )));
         }
@@ -47,7 +47,7 @@ impl UploadStore {
         let embeddings = llm_client
             .embed(&chunks)
             .await
-            .map_err(|e| VaneError::Provider {
+            .map_err(|e| LibraError::Provider {
                 provider: cfg.default_embedding_model.clone(),
                 message: format!("embedding failed: {e}"),
             })?;
@@ -68,7 +68,7 @@ impl UploadStore {
     }
 
     /// Top-k chunks across the given files, ranked by cosine similarity to the query.
-    pub async fn retrieve(&self, chat_id: &str, file_ids: &[String], query: &str, limit: usize) -> Result<Vec<Chunk>, VaneError> {
+    pub async fn retrieve(&self, chat_id: &str, file_ids: &[String], query: &str, limit: usize) -> Result<Vec<Chunk>, LibraError> {
         let cfg = self.cfg.get();
         let rows = self.db.chunks_for_files(file_ids).await?;
         if rows.is_empty() {
@@ -78,7 +78,7 @@ impl UploadStore {
         let qemb = llm_client
             .embed(&[query.to_string()])
             .await
-            .map_err(|e| VaneError::Provider {
+            .map_err(|e| LibraError::Provider {
                 provider: cfg.default_embedding_model.clone(),
                 message: format!("embedding failed: {e}"),
             })?
