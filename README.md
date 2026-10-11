@@ -1,4 +1,4 @@
-# Vane Next
+# Libra
 
 A self-hosted answer engine — a rebuild of [Vane](https://github.com/ItzCrazyKns/Vane) with a
 **Rust + Redis + SQLite** backend and a **Next.js** frontend. One binary serves the API and the
@@ -12,7 +12,7 @@ question → classify → widgets ┐
 
 ## Why this shape
 
-| | upstream Vane | Vane Next |
+| | original | Libra |
 |---|---|---|
 | backend | Next.js (Node) | Rust (axum), single static binary |
 | storage | SQLite (drizzle) | SQLite (sqlx, WAL) |
@@ -23,7 +23,7 @@ question → classify → widgets ┐
 | UI | full React app | lean Next.js app, statically exported and served by the Rust binary |
 
 The research loop is the main behavioural deviation: upstream drives a multi-iteration agent
-through native tool calls, which needs a strong model. Vane Next classifies, picks widgets,
+through native tool calls, which needs a strong model. Libra classifies, picks widgets,
 searches once across providers, reranks with a cheap model, then writes. That keeps latency low
 and works with small local models. It is a deliberate trade-off, not a missing feature.
 
@@ -33,8 +33,9 @@ and works with small local models. It is a deliberate trade-off, not a missing f
 docker compose up --build      # UI + API on http://localhost:3001
 ```
 
-Then open `http://localhost:3001/settings`, set a model provider key (or point Ollama at
-`OLLAMA_API_URL`) and ask something.
+A fresh instance has no model providers. Open `http://localhost:3001/settings/?tab=providers`, add
+one (Ollama, OpenAI, OpenRouter, Anthropic, Gemini or any OpenAI-compatible server) with the models
+it serves, and ask something.
 
 ### Without Docker
 
@@ -65,7 +66,7 @@ src/
   uploads/           text/pdf/docx extraction, chunking, embedding, cosine retrieval
   widgets/           calculator, time, weather (Open-Meteo), stocks (stooq)
   prompts/           every LLM prompt, all returning strict JSON
-web/                 Next.js app router + Tailwind (static export)
+web/                 Next.js app router + plain CSS from the design/ mockups (static export)
 docker/              searxng settings
 ```
 
@@ -93,8 +94,9 @@ The same blocks are persisted, so reloading a chat replays it exactly.
 ## Configuration
 
 Everything in `.env.example` can also be changed at runtime from `/settings` (written to
-`$VANE_DATA_DIR/settings.json`, applied to the live `SettingsHandle` without a restart).
-Env vars seed defaults; `settings.json` overrides them; the API overrides both.
+`$LIBRA_DATA_DIR/settings.json`, applied to the live `SettingsHandle` without a restart).
+Env vars seed defaults; `settings.json` overrides them; the API overrides both. Model providers and
+the models chosen from them are the exception: they only come from Settings, never from env vars.
 
 Search fallback order is per kind (`WEB_SEARCH_ORDER`, …). A provider is skipped when it has no
 key, is disabled, or returns nothing — the first provider with results wins.
@@ -117,3 +119,4 @@ enough to exercise the whole pipeline end to end.
 - Currency conversion in the calculator, and the upstream "discussion mode" long-form writer.
 - Auth: the service is assumed to sit behind a reverse proxy. CORS is wide open for dev.
 - Embedding search is brute-force cosine over SQLite BLOBs — fine up to a few thousand chunks.
+# libra
