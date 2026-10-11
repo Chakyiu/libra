@@ -25,6 +25,10 @@
 }
 
 .composer__field:focus-within { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
+.composer.is-drop .composer__field {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 7%, var(--surface));
+}
 
 .composer textarea {
   flex: 1;
@@ -44,11 +48,22 @@
 
 .composer__foot {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px 14px;
   flex-wrap: wrap;
   margin-top: 9px;
 }
+
+/* Web, attach, and depth stay on one row. The answer model is the next line. */
+.scope {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.scope__model { max-width: 100%; }
+.scope__model select { max-width: min(100%, 36rem); }
 
 .composer__error {
   font-size: 12.5px;
@@ -75,6 +90,17 @@
 }
 
 .askbox__field:focus-within { border-color: color-mix(in oklch, var(--accent) 60%, var(--border)); }
+.askbox.is-drop .askbox__field {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 7%, var(--surface));
+}
+
+.drop-hint {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
 
 .askbox textarea {
   flex: 1;
@@ -94,7 +120,7 @@
 
 .askbox__bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px 14px;
   flex-wrap: wrap;

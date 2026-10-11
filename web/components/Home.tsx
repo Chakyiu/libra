@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Scope, { useAttachments } from "@/components/Scope";
+import Scope, { useAttachments, useFileDrop } from "@/components/Scope";
 import Topbar, { VERSION, useHost } from "@/components/Topbar";
 import { ArrowIcon, Mark } from "@/components/icons";
 import { useInstance } from "@/components/instance";
@@ -51,6 +51,7 @@ export default function Home() {
   const [draft] = useState(uuid);
   const [text, setText] = useState("");
   const att = useAttachments(draft);
+  const drop = useFileDrop(att.attach, att.uploading);
   const box = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -80,12 +81,17 @@ export default function Home() {
             <p className="hero__sub">Every sentence carries its source. Ask the open web or your own files — on your own hardware.</p>
 
             <form
-              className="askbox"
+              className={`askbox${drop.over ? " is-drop" : ""}`}
               onSubmit={(e) => {
                 e.preventDefault();
                 ask(text);
               }}
+              onDragEnter={drop.onDragEnter}
+              onDragOver={drop.onDragOver}
+              onDragLeave={drop.onDragLeave}
+              onDrop={drop.onDrop}
             >
+              {drop.over && <p className="drop-hint">Drop to attach</p>}
               <div className="askbox__field">
                 <textarea
                   ref={box}

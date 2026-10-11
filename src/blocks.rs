@@ -4,7 +4,7 @@
 
 use crate::search::types::SearchResult;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +23,8 @@ pub enum BlockType {
     Answered,
     /// One round of "decide what to search, then search it".
     Research,
+    /// The model's reasoning trace, kept so a reopened thread still shows it.
+    Thought,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,7 +75,14 @@ impl Block {
         }
     }
 
-    pub fn research(depth: &str, round: usize, rounds: usize, queries: &[String], note: &str, step: &str) -> Self {
+    pub fn research(
+        depth: &str,
+        round: usize,
+        rounds: usize,
+        queries: &[String],
+        note: &str,
+        step: &str,
+    ) -> Self {
         Self {
             block_type: BlockType::Research,
             message: note.to_string(),
@@ -84,6 +93,15 @@ impl Block {
                 "queries": queries,
                 "step": step,
             })),
+            extra: None,
+        }
+    }
+
+    pub fn thought(text: &str) -> Self {
+        Self {
+            block_type: BlockType::Thought,
+            message: text.to_string(),
+            data: None,
             extra: None,
         }
     }

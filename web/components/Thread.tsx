@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Scope, { useAttachments } from "@/components/Scope";
+import Scope, { useAttachments, useFileDrop } from "@/components/Scope";
 import { KindFilter, SheetState, SourcesPanel, SourcesSheet } from "@/components/Sources";
 import Topbar from "@/components/Topbar";
 import TurnView from "@/components/Turn";
@@ -21,15 +21,30 @@ import { adoptHistory, getRun, startRun, stopRun, subscribeRun } from "@/lib/run
 import { kindOf } from "@/lib/sources";
 import { Turn, fromMessages, hasReferences, isStreaming, sourcesOf } from "@/lib/turn";
 
+/** A run still in this tab can be ahead of the last row written to SQLite. */
+function keepLocal(local: Turn[], server: Turn[]) {
+  if (local.length > server.length) return true;
+  const a = local[local.length - 1];
+  const b = server[server.length - 1];
+  if (!a) return false;
+  if (!b) return true;
+  if (a.answer.length > b.answer.length) return true;
+  if (!isStreaming(a.phase) && isStreaming(b.phase)) return true;
+  return false;
+}
+
 type Attachments = ReturnType<typeof useAttachments>;
 
 function Composer({
   busy,
+  held,
   onSend,
   att,
   pill,
 }: {
   busy: boolean;
+  /** The thread is still being read back; the box stays closed without claiming an answer is in progress. */
+  held?: boolean;
   onSend: (question: string) => void;
   att: Attachments;
   pill: React.ReactNode;
@@ -39,6 +54,7 @@ function Composer({
   const refocus = useRef(false);
   const phone = useMedia("(max-width: 760px)");
   const { needsProvider } = useInstance();
+  const drop = useFileDrop(att.attach, busy || !!held || att.uploading);
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -55,8 +71,9 @@ function Composer({
     }
   }, [busy]);
 
+  const closed = busy || held;
   const submit = () => {
-    if (busy || att.uploading || needsProvider || !text.trim()) return;
+    if (closed || att.uploading || needsProvider || !text.trim()) return;
     refocus.current = document.activeElement === box.current && matchMedia("(pointer: fine)").matches;
     onSend(text);
     setText("");
@@ -64,14 +81,19 @@ function Composer({
 
   return (
     <form
-      className={`composer${busy ? " is-busy" : ""}`}
+      className={`composer${closed ? " is-busy" : ""}${drop.over ? " is-drop" : ""}`}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
       }}
+      onDragEnter={drop.onDragEnter}
+      onDragOver={drop.onDragOver}
+      onDragLeave={drop.onDragLeave}
+      onDrop={drop.onDrop}
     >
       {pill}
       <div className="composer__inner">
+        {drop.over && <p className="drop-hint">Drop to attach</p>}
         <div className="composer__field">
           <textarea
             ref={box}
@@ -85,19 +107,23 @@ function Composer({
                 submit();
               }
             }}
-            disabled={busy}
+            disabled={closed}
             placeholder={
               phone
                 ? busy
                   ? "Answering…"
-                  : "Ask a follow-up"
+                  : held
+                    ? "Opening…"
+                    : "Ask a follow-up"
                 : busy
                   ? "Libra is answering — follow-ups open when it finishes"
-                  : "Ask a follow-up — the thread stays in context"
+                  : held
+                    ? "Opening thread…"
+                    : "Ask a follow-up — the thread stays in context"
             }
             aria-label="Ask a follow-up"
           />
-          <button className="btn btn--primary" type="submit" disabled={busy || needsProvider} aria-label="Ask">
+          <button className="btn btn--primary" type="submit" disabled={closed || needsProvider} aria-label="Ask">
             <span className="btn__label">Ask</span>
             <ArrowIcon />
           </button>
@@ -109,7 +135,7 @@ function Composer({
             onSelect={att.setSelected}
             onAttach={att.attach}
             uploading={att.uploading}
-            disabled={busy}
+            disabled={closed}
           />
           <span className="topbar__spacer" />
           <span className="meta composer__hint">
@@ -202,8 +228,8 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
         att.setFiles(r.chat.files ?? []);
         const serverTurns = fromMessages(r.messages);
         const run = getRun(chatId);
-        // The database has no messages until the answer finishes. A run still
-        // in flight (or just finished ahead of that save) is the thread.
+        // SQLite already has the question and whatever has been written. A run
+        // still in this tab can be a few tokens ahead of that row.
         if (run?.busy) {
           const before = run.turns.length;
           adoptHistory(chatId, serverTurns);
@@ -211,12 +237,12 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
           setBusy(() => !!getRun(chatId)?.busy);
           const next = getRun(chatId);
           if (next?.busy && next.turns.length > before) setActive(next.turns.length - 1);
-        } else if (run && run.turns.length > serverTurns.length) {
+        } else if (run && keepLocal(run.turns, serverTurns)) {
           setTurns(run.turns);
           setBusy(false);
         } else {
           setTurns(serverTurns);
-          setBusy(false);
+          setBusy(serverTurns.some((t) => isStreaming(t.phase)));
         }
         setStatus("ready");
       })
@@ -249,6 +275,34 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
       }),
     [chatId],
   );
+
+  // After a refresh the stream is gone, but the server is still writing the turn.
+  // Poll until that row reaches a terminal phase.
+  const watch = turns.some((t) => isStreaming(t.phase));
+  useEffect(() => {
+    if (!watch || getRun(chatId)?.busy) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (getRun(chatId)?.busy) return;
+      try {
+        const r = await api<{ chat: Chat; messages: ChatMessage[] }>(`/api/chats/${chatId}`);
+        if (cancelled || getRun(chatId)?.busy) return;
+        const next = fromMessages(r.messages);
+        setChat(r.chat);
+        setTurns(next);
+        const still = next.some((t) => isStreaming(t.phase));
+        setBusy(still);
+        if (!still) settle();
+      } catch {
+        // keep the last snapshot; the next tick tries again
+      }
+    };
+    const id = window.setInterval(tick, 500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [watch, chatId, settle]);
 
   // A question carried in the URL (from home or discover) is asked once the thread is ready.
   // Deferred a tick so a StrictMode remount cancels the timer, not the stream.
@@ -366,7 +420,12 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
   }, []);
 
   const followUp = useCallback((q: string) => send(q, selectedRef.current), [send]);
-  const stop = useCallback(() => stopRun(chatId), [chatId]);
+  const stop = useCallback(() => {
+    if (stopRun(chatId)) return;
+    // The stream died with the page. The server is still writing; Stop ends that.
+    setTurns((ts) => ts.map((t) => (isStreaming(t.phase) ? { ...t, phase: "stopped" } : t)));
+    setBusy(false);
+  }, [chatId]);
   const retry = useCallback(
     (index: number) => {
       const t = turnsRef.current[index];
@@ -429,7 +488,7 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
                 <span className="btn__label">Sources</span>
               </button>
             )}
-            <button className="btn btn--quiet" onClick={() => last && send(last.question, last.files)} disabled={busy || !last} title="Ask the last question again">
+            <button className="btn btn--quiet" onClick={() => last && send(last.question, last.files)} disabled={busy || status === "loading" || !last} title="Ask the last question again">
               <RerunIcon />
               <span className="btn__label">Re-run</span>
             </button>
@@ -478,6 +537,7 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
 
           <Composer
             busy={busy}
+            held={status === "loading"}
             onSend={(q) => send(q, att.selected)}
             att={att}
             pill={

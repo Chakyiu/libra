@@ -91,6 +91,31 @@
   border: 1px solid var(--muted);
   flex: none;
 }
+.think {
+  margin: 0 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--sunken);
+}
+.think summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.think pre {
+  margin: 0;
+  padding: 0 12px 12px;
+  max-height: 11rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: 12.5px/1.45 var(--font-mono);
+  color: var(--muted);
+}
+
 .research {
   margin: -8px 0 22px;
 }
@@ -225,15 +250,18 @@
 
 .answer hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
 
-.answer table {
-  display: block;
+.answer__table {
   max-width: 100%;
   overflow-x: auto;
+  margin: 0 0 1.4em;
+}
+.answer table {
+  width: 100%;
   border-collapse: collapse;
   font-family: var(--font-body);
   font-size: 13.5px;
   line-height: 1.5;
-  margin: 0 0 1.4em;
+  margin: 0;
 }
 .answer th,
 .answer td {
@@ -254,7 +282,7 @@
 .answer img { max-width: 100%; height: auto; border: 1px solid var(--border); }
 
 /* the writing caret rides on the last block while the answer streams */
-.answer.is-writing > :last-child:not(ul):not(ol):not(pre):not(table)::after,
+.answer.is-writing > :last-child:not(ul):not(ol):not(pre):not(table):not(.answer__table)::after,
 .answer.is-writing > ul:last-child > li:last-child::after,
 .answer.is-writing > ol:last-child > li:last-child::after {
   content: '';

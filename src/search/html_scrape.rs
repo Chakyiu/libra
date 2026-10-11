@@ -1,7 +1,7 @@
 use crate::config::SettingsHandle;
 use crate::error::ProviderError;
 use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
-use crate::search::{parse_html, select, select_in, text_of, urlencode, SearchProvider};
+use crate::search::{SearchProvider, parse_html, select, select_in, text_of, urlencode};
 use reqwest::Client;
 use std::pin::Pin;
 
@@ -15,7 +15,10 @@ pub struct HtmlScrape {
 
 impl HtmlScrape {
     pub fn new(http: &Client, cfg: SettingsHandle) -> Self {
-        Self { http: http.clone(), cfg }
+        Self {
+            http: http.clone(),
+            cfg,
+        }
     }
 }
 
@@ -23,8 +26,13 @@ impl HtmlScrape {
 fn clean_url(raw: &str) -> String {
     use base64::Engine;
     if let Some(rest) = raw.split("&u=a1").nth(1) {
-        let token: String = rest.chars().take_while(|c| *c != '&' && *c != '#').collect();
-        if let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(token.trim_start_matches('=')) {
+        let token: String = rest
+            .chars()
+            .take_while(|c| *c != '&' && *c != '#')
+            .collect();
+        if let Ok(bytes) =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(token.trim_start_matches('='))
+        {
             if let Ok(url) = String::from_utf8(bytes) {
                 if url.starts_with("http") {
                     return url;
@@ -41,10 +49,17 @@ impl SearchProvider for HtmlScrape {
     }
 
     fn supports(&self, kind: SearchKind) -> bool {
-        matches!(kind, SearchKind::Web | SearchKind::News | SearchKind::Images)
+        matches!(
+            kind,
+            SearchKind::Web | SearchKind::News | SearchKind::Images
+        )
     }
 
-    fn search<'a>(&'a self, q: &'a SearchQuery) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>> {
+    fn search<'a>(
+        &'a self,
+        q: &'a SearchQuery,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let cfg = self.cfg.get();
             let url = match q.kind {
@@ -82,7 +97,8 @@ impl SearchProvider for HtmlScrape {
                 SearchKind::Images => select(doc, "a.iusc")
                     .iter()
                     .filter_map(|a| {
-                        let meta: serde_json::Value = serde_json::from_str(a.value().attr("m")?).ok()?;
+                        let meta: serde_json::Value =
+                            serde_json::from_str(a.value().attr("m")?).ok()?;
                         Some(SearchResult {
                             title: meta["t"].as_str().unwrap_or("").to_string(),
                             url: meta["purl"].as_str().unwrap_or("").to_string(),

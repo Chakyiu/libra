@@ -6,7 +6,9 @@ pub struct SseParser {
 
 impl SseParser {
     pub fn new() -> Self {
-        Self { buf: Vec::with_capacity(8 * 1024) }
+        Self {
+            buf: Vec::with_capacity(8 * 1024),
+        }
     }
 
     /// Events from this chunk. `done` is set when the stream sends `data: [DONE]`,
@@ -17,19 +19,31 @@ impl SseParser {
         self.buf.extend_from_slice(bytes);
         while let Some(idx) = self.buf.iter().position(|b| *b == b'\n') {
             let line: Vec<u8> = self.buf.drain(..=idx).collect();
-            let line = String::from_utf8_lossy(&line).trim_end_matches(['\r', '\n']).to_string();
-            if line.is_empty() || line.starts_with(':') || line.starts_with("event:") || line.starts_with("id:") {
+            let line = String::from_utf8_lossy(&line)
+                .trim_end_matches(['\r', '\n'])
+                .to_string();
+            if line.is_empty()
+                || line.starts_with(':')
+                || line.starts_with("event:")
+                || line.starts_with("id:")
+            {
                 continue;
             }
             if let Some(data) = line.strip_prefix("data:") {
                 let data = data.trim_start();
                 if data == "[DONE]" {
-                    return SseBatch { data: out, done: true };
+                    return SseBatch {
+                        data: out,
+                        done: true,
+                    };
                 }
                 out.push(data.to_string());
             }
         }
-        SseBatch { data: out, done: false }
+        SseBatch {
+            data: out,
+            done: false,
+        }
     }
 }
 

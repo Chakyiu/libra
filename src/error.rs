@@ -14,7 +14,11 @@ pub struct ProviderError {
 
 impl From<reqwest::Error> for ProviderError {
     fn from(e: reqwest::Error) -> Self {
-        ProviderError { provider: String::new(), status: 0, message: e.to_string() }
+        ProviderError {
+            provider: String::new(),
+            status: 0,
+            message: e.to_string(),
+        }
     }
 }
 
@@ -27,10 +31,7 @@ pub enum LibraError {
     #[error("no model configured: {0}")]
     NoModel(String),
     #[error("{provider} search/provider error: {message}")]
-    Provider {
-        provider: String,
-        message: String,
-    },
+    Provider { provider: String, message: String },
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
 }

@@ -1,6 +1,6 @@
 use crate::error::ProviderError;
 use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
-use crate::search::{parse_html, select, select_in, text_of, urldecode, urlencode, SearchProvider};
+use crate::search::{SearchProvider, parse_html, select, select_in, text_of, urldecode, urlencode};
 use reqwest::Client;
 use std::pin::Pin;
 
@@ -24,7 +24,11 @@ impl SearchProvider for DuckDuckGo {
         matches!(kind, SearchKind::Web | SearchKind::News)
     }
 
-    fn search<'a>(&'a self, q: &'a SearchQuery) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>> {
+    fn search<'a>(
+        &'a self,
+        q: &'a SearchQuery,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let base = if q.kind == SearchKind::News {
                 "https://duckduckgo.com/html/?q="
@@ -41,7 +45,12 @@ impl SearchProvider for DuckDuckGo {
                 for node in select(doc, "div.result div.result__body > :not(.result__extras)") {
                     let title = select_in(&node, "a.result__a")
                         .first()
-                        .map(|a| (a.text().collect::<Vec<_>>().join(""), a.value().attr("href").unwrap_or("").to_string()))
+                        .map(|a| {
+                            (
+                                a.text().collect::<Vec<_>>().join(""),
+                                a.value().attr("href").unwrap_or("").to_string(),
+                            )
+                        })
                         .unwrap_or_default();
                     let snippet = text_of(&node, "a.result__snippet");
                     let mut link = title.1;

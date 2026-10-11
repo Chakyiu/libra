@@ -1,9 +1,9 @@
 use crate::config::SettingsHandle;
 use crate::error::ProviderError;
-use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
 use crate::search::SearchProvider;
+use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::pin::Pin;
 
 pub struct Tavily {
@@ -13,7 +13,10 @@ pub struct Tavily {
 
 impl Tavily {
     pub fn new(http: &Client, cfg: SettingsHandle) -> Self {
-        Self { http: http.clone(), cfg }
+        Self {
+            http: http.clone(),
+            cfg,
+        }
     }
 }
 
@@ -23,10 +26,17 @@ impl SearchProvider for Tavily {
     }
 
     fn supports(&self, kind: SearchKind) -> bool {
-        matches!(kind, SearchKind::Web | SearchKind::News | SearchKind::Images)
+        matches!(
+            kind,
+            SearchKind::Web | SearchKind::News | SearchKind::Images
+        )
     }
 
-    fn search<'a>(&'a self, q: &'a SearchQuery) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>> {
+    fn search<'a>(
+        &'a self,
+        q: &'a SearchQuery,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let cfg = self.cfg.get();
             let mut body = json!({
@@ -66,7 +76,10 @@ impl SearchProvider for Tavily {
                     snippet: r["content"].as_str().unwrap_or("").to_string(),
                     score: r["score"].as_f64(),
                     published_at: r["published_date"].as_str().map(Into::into),
-                    image: r["image"].as_str().filter(|s| !s.is_empty()).map(Into::into),
+                    image: r["image"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(Into::into),
                     source: "tavily".into(),
                     ..Default::default()
                 })

@@ -11,8 +11,8 @@ mod pipeline;
 mod prompts;
 mod search;
 mod settings;
-mod suggestions;
 mod state;
+mod suggestions;
 mod uploads;
 mod widgets;
 
@@ -44,7 +44,9 @@ async fn main() -> anyhow::Result<()> {
     let addr = format!("{}:{}", cfg.host, cfg.port);
     let listener = tokio::net::TcpListener::bind(addr.as_str()).await?;
     tracing::info!("Libra listening on http://{}:{}", cfg.host, cfg.port);
-    axum::serve(listener, api::router(app)).with_graceful_shutdown(shutdown_signal()).await?;
+    axum::serve(listener, api::router(app))
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
 }
 

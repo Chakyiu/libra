@@ -4,7 +4,11 @@ use serde_json::Value;
 use std::path::Path;
 
 /// Apply a partial settings patch, validate it, persist it, and swap the live config.
-pub fn apply_patch(handle: &SettingsHandle, patch: &Value, db_path: &Path) -> Result<Value, LibraError> {
+pub fn apply_patch(
+    handle: &SettingsHandle,
+    patch: &Value,
+    db_path: &Path,
+) -> Result<Value, LibraError> {
     let mut cfg = (*handle.get()).clone();
     cfg.apply_settings(patch);
     validate(&cfg, db_path)?;
@@ -29,7 +33,10 @@ fn validate(cfg: &Config, db_path: &Path) -> Result<(), LibraError> {
             )));
         }
         if !ids.insert(p.id.as_str()) {
-            return Err(LibraError::BadRequest(format!("two providers share the id '{}'", p.id)));
+            return Err(LibraError::BadRequest(format!(
+                "two providers share the id '{}'",
+                p.id
+            )));
         }
     }
     // Empty means not chosen yet: a fresh instance has no providers to pick from.
@@ -45,13 +52,19 @@ fn validate(cfg: &Config, db_path: &Path) -> Result<(), LibraError> {
         }
     }
     if cfg.num_web_results == 0 || cfg.num_web_results > 50 {
-        return Err(LibraError::BadRequest("numWebResults must be between 1 and 50".into()));
+        return Err(LibraError::BadRequest(
+            "numWebResults must be between 1 and 50".into(),
+        ));
     }
     if cfg.rerank_limit == 0 || cfg.rerank_limit > 20 {
-        return Err(LibraError::BadRequest("rerankLimit must be between 1 and 20".into()));
+        return Err(LibraError::BadRequest(
+            "rerankLimit must be between 1 and 20".into(),
+        ));
     }
     if !(0.0..=2.0).contains(&cfg.default_temperature) {
-        return Err(LibraError::BadRequest("defaultTemperature must be between 0 and 2".into()));
+        return Err(LibraError::BadRequest(
+            "defaultTemperature must be between 0 and 2".into(),
+        ));
     }
     for kind in [
         crate::search::types::SearchKind::Web,

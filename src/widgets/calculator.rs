@@ -40,7 +40,11 @@ impl Parser {
             let op = self.c[self.i];
             self.i += 1;
             let right = self.term()?;
-            left = if op == '+' { left + right } else { left - right };
+            left = if op == '+' {
+                left + right
+            } else {
+                left - right
+            };
         }
         Ok(left)
     }
@@ -104,7 +108,9 @@ impl Parser {
                 break;
             }
         }
-        number.parse::<f64>().map_err(|_| "expected a number".to_string())
+        number
+            .parse::<f64>()
+            .map_err(|_| "expected a number".to_string())
     }
 }
 
@@ -114,7 +120,10 @@ mod tests {
 
     fn near(input: &str, expected: f64) {
         let got = eval(input).unwrap_or_else(|e| panic!("{input}: {e}"));
-        assert!((got - expected).abs() < 1e-9, "{input} = {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-9,
+            "{input} = {got}, expected {expected}"
+        );
     }
 
     #[test]

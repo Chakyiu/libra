@@ -1,9 +1,9 @@
 use crate::config::SettingsHandle;
 use crate::error::ProviderError;
-use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
 use crate::search::SearchProvider;
+use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::pin::Pin;
 
 pub struct Exa {
@@ -13,7 +13,10 @@ pub struct Exa {
 
 impl Exa {
     pub fn new(http: &Client, cfg: SettingsHandle) -> Self {
-        Self { http: http.clone(), cfg }
+        Self {
+            http: http.clone(),
+            cfg,
+        }
     }
 }
 
@@ -26,7 +29,11 @@ impl SearchProvider for Exa {
         matches!(kind, SearchKind::Web | SearchKind::News)
     }
 
-    fn search<'a>(&'a self, q: &'a SearchQuery) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>> {
+    fn search<'a>(
+        &'a self,
+        q: &'a SearchQuery,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let cfg = self.cfg.get();
             let mut body = json!({
@@ -64,7 +71,12 @@ impl SearchProvider for Exa {
                     url: r["url"].as_str().unwrap_or("").to_string(),
                     snippet: r["highlights"]["highlights"]
                         .as_array()
-                        .map(|h| h.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(" "))
+                        .map(|h| {
+                            h.iter()
+                                .filter_map(|x| x.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        })
                         .unwrap_or_default(),
                     content: r["text"].as_str().map(Into::into),
                     score: r["score"].as_f64(),

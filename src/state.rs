@@ -2,13 +2,19 @@
 //! id / answer chunk / block / close (+ error message on close).
 
 use crate::blocks::Block;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone)]
 pub enum Event {
     Id(String),
     AnswerChunk(String),
+    /// A piece of the model's reasoning, streamed ahead of the answer.
+    Thought(String),
     Block(Block),
+    /// Ask the browser for the user's place. `precise` is coordinates; otherwise only the timezone.
+    NeedLocation {
+        precise: bool,
+    },
     Close(Option<String>),
 }
 
@@ -17,7 +23,9 @@ impl Event {
         match self {
             Event::Id(id) => json!({ "type": "id", "id": id }),
             Event::AnswerChunk(c) => json!({ "type": "a", "c": c }),
+            Event::Thought(c) => json!({ "type": "t", "c": c }),
             Event::Block(b) => json!({ "type": "b", "block": b.to_value() }),
+            Event::NeedLocation { precise } => json!({ "type": "loc", "precise": precise }),
             Event::Close(None) => json!({ "type": "e" }),
             Event::Close(Some(err)) => json!({ "type": "c", "message": err }),
         }
@@ -62,7 +70,12 @@ impl App {
             .build()?;
         let search = Arc::new(SearchHub::new(&http, settings.clone(), cache.clone()));
         let widgets = Arc::new(Registry::new(&http, settings.clone()));
-        let uploads = Arc::new(UploadStore::new(&http, settings.clone(), db.clone(), cache.clone()));
+        let uploads = Arc::new(UploadStore::new(
+            &http,
+            settings.clone(),
+            db.clone(),
+            cache.clone(),
+        ));
         let pipeline = Arc::new(Pipeline {
             cfg: settings.clone(),
             db: db.clone(),
@@ -70,7 +83,17 @@ impl App {
             search: search.clone(),
             widgets: widgets.clone(),
             uploads: uploads.clone(),
+            runs: crate::pipeline::Runs::default(),
+            locations: crate::pipeline::Locations::default(),
         });
-        Ok(Self { settings, db, cache, http, search, uploads, pipeline })
+        Ok(Self {
+            settings,
+            db,
+            cache,
+            http,
+            search,
+            uploads,
+            pipeline,
+        })
     }
 }

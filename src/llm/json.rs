@@ -32,12 +32,17 @@ pub fn extract_json(raw: &str) -> anyhow::Result<serde_json::Value> {
             return Ok(v);
         }
     }
-    anyhow::bail!("no JSON found in model output: {}", &s.chars().take(240).collect::<String>())
+    anyhow::bail!(
+        "no JSON found in model output: {}",
+        &s.chars().take(240).collect::<String>()
+    )
 }
 
 fn balanced(s: &str) -> &str {
     let bytes = s.as_bytes();
-    let Some(open) = bytes.first().copied() else { return s };
+    let Some(open) = bytes.first().copied() else {
+        return s;
+    };
     let close = match open {
         b'{' => b'}',
         b'[' => b']',
@@ -106,7 +111,8 @@ mod tests {
 
     #[test]
     fn fences_and_prose() {
-        let v = extract_json("Sure! ```json\n{\"a\": 1, \"b\": [1,2,]}\n``` hope that helps").unwrap();
+        let v =
+            extract_json("Sure! ```json\n{\"a\": 1, \"b\": [1,2,]}\n``` hope that helps").unwrap();
         assert_eq!(v["a"], 1);
         assert_eq!(v["b"].as_array().unwrap().len(), 2);
     }

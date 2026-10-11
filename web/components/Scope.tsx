@@ -1,12 +1,19 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import { ChevronDownIcon, ClipIcon } from "@/components/icons";
 import { useAnswerModel, useInstance } from "@/components/instance";
 import { useThreads } from "@/components/threads";
 import { FileRef, ensureChat, uploadFiles } from "@/lib/api";
 import { modelLabel } from "@/lib/format";
 import { setPref, usePref } from "@/lib/prefs";
+
+const IMAGE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+export function isImageFile(file: File) {
+  return file.type.startsWith("image/") || IMAGE.test(file.name);
+}
 
 /**
  * Files attached to a thread and which of them the next question is scoped to.
@@ -21,14 +28,21 @@ export function useAttachments(chatId: string) {
   const [error, setError] = useState("");
 
   const attach = useCallback(
-    async (picked: File[]) => {
+    async (incoming: File[]) => {
+      let picked = incoming.filter((f) => f.size > 0);
       if (!picked.length) return;
-      if (settings && !settings.defaultEmbeddingModel) {
-        setError("Files are read with an embedding model — pick one in Settings → Answering first.");
-        return;
+      const docs = picked.filter((f) => !isImageFile(f));
+      let note = "";
+      if (docs.length && settings && !settings.defaultEmbeddingModel) {
+        note = "Text files are read with an embedding model — pick one in Settings → Answering first.";
+        picked = picked.filter(isImageFile);
+        if (!picked.length) {
+          setError(note);
+          return;
+        }
       }
       setUploading(true);
-      setError("");
+      setError(note);
       try {
         await ensureChat(chatId);
         const res = await uploadFiles(chatId, picked);
@@ -38,7 +52,8 @@ export function useAttachments(chatId: string) {
         setSelected((sel) => [...sel, ...added.map((f) => f.id)]);
         reload();
       } catch (e: any) {
-        setError(`Couldn’t read that file — ${e.message}`);
+        const message = e?.name === "AbortError" ? "timed out" : e.message;
+        setError(`Couldn’t read that file — ${message}`);
       } finally {
         setUploading(false);
       }
@@ -47,6 +62,39 @@ export function useAttachments(chatId: string) {
   );
 
   return { files, setFiles, selected, setSelected, uploading, error, setError, attach };
+}
+
+/** Drop files onto a composer. `over` is true while a file is hovering and the drop is allowed. */
+export function useFileDrop(onDropFiles: (files: File[]) => void, disabled: boolean) {
+  const [over, setOver] = useState(false);
+  const depth = useRef(0);
+
+  const onDragEnter = (e: DragEvent) => {
+    if (!Array.from(e.dataTransfer.types).includes("Files")) return;
+    e.preventDefault();
+    depth.current += 1;
+    if (!disabled) setOver(true);
+  };
+  const onDragOver = (e: DragEvent) => {
+    if (!Array.from(e.dataTransfer.types).includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = disabled ? "none" : "copy";
+  };
+  const onDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    depth.current = Math.max(0, depth.current - 1);
+    if (depth.current === 0) setOver(false);
+  };
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    depth.current = 0;
+    setOver(false);
+    if (disabled) return;
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length) onDropFiles(files);
+  };
+
+  return { over, onDragEnter, onDragOver, onDragLeave, onDrop };
 }
 
 type ScopeProps = {
@@ -66,75 +114,78 @@ export default function Scope({ files, selected, onSelect, onAttach, uploading, 
   const toggle = (id: string) => onSelect(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
 
   return (
-    <div className="chips" role="group" aria-label="Answer from">
-      <button
-        type="button"
-        className="chip"
-        aria-pressed={selected.length === 0}
-        onClick={() => onSelect([])}
-        disabled={disabled}
-        title="Search the web for the answer"
-      >
-        <i className="chip__led" />
-        Web
-      </button>
-      {files.map((f) => (
+    <div className="scope">
+      <div className="chips" role="group" aria-label="Answer from">
         <button
-          key={f.id}
           type="button"
-          className="chip chip--file"
-          aria-pressed={selected.includes(f.id)}
-          onClick={() => toggle(f.id)}
+          className="chip"
+          aria-pressed={selected.length === 0}
+          onClick={() => onSelect([])}
           disabled={disabled}
-          title={`Answer from ${f.name}`}
+          title="Search the web for the answer"
         >
           <i className="chip__led" />
-          <span>{f.name}</span>
+          Web
         </button>
-      ))}
-      <button
-        type="button"
-        className="chip chip--action"
-        onClick={() => input.current?.click()}
-        disabled={disabled || uploading}
-        title="Attach text, Markdown, CSV, PDF or Word files"
-      >
-        <ClipIcon />
-        {uploading ? "Reading…" : "Attach"}
-      </button>
-      <input
-        ref={input}
-        type="file"
-        multiple
-        hidden
-        onChange={(e) => {
-          // copy first: clearing the input empties its live FileList
-          const picked = Array.from(e.target.files ?? []);
-          e.target.value = "";
-          onAttach(picked);
-        }}
-      />
-      <label
-        className="chip chip--select"
-        title="The fast model plans the first search, then decides the next round from what came back. It drops sources that do not help, and the rerank model orders what is left. Fast is one round, Balance is two, Deep is three."
-      >
-        <span className="sr-only">Search depth</span>
-        <select
-          value={depth}
-          disabled={disabled}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "fast" || v === "balance" || v === "deep") setPref("depth", v);
-          }}
+        {files.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            className="chip chip--file"
+            aria-pressed={selected.includes(f.id)}
+            onClick={() => toggle(f.id)}
+            disabled={disabled}
+            title={`Answer from ${f.name}`}
+          >
+            <i className="chip__led" />
+            <span>{f.name}</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          className="chip chip--action"
+          onClick={() => input.current?.click()}
+          disabled={disabled || uploading}
+          title="Attach a text file, PDF, Word document, or image. You can also drop it on the box."
         >
-          <option value="fast">Fast search</option>
-          <option value="balance">Balance search</option>
-          <option value="deep">Deep search</option>
-        </select>
-        <ChevronDownIcon />
-      </label>
+          <ClipIcon />
+          {uploading ? "Reading…" : "Attach"}
+        </button>
+        <input
+          ref={input}
+          type="file"
+          multiple
+          hidden
+          accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.txt,.md,.csv,.pdf,.docx,text/plain,application/pdf"
+          onChange={(e) => {
+            // copy first: clearing the input empties its live FileList
+            const picked = Array.from(e.target.files ?? []);
+            e.target.value = "";
+            onAttach(picked);
+          }}
+        />
+        <label
+          className="chip chip--select"
+          title="The fast model plans the first search, then decides the next round from what came back. It drops sources that do not help, and the rerank model orders what is left. Fast is one round, Balance is two, Deep is three."
+        >
+          <span className="sr-only">Search depth</span>
+          <select
+            value={depth}
+            disabled={disabled}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "fast" || v === "balance" || v === "deep") setPref("depth", v);
+            }}
+          >
+            <option value="fast">Fast search</option>
+            <option value="balance">Balance search</option>
+            <option value="deep">Deep search</option>
+          </select>
+          <ChevronDownIcon />
+        </label>
+      </div>
       {models.chat.length > 0 && (
-        <label className="chip chip--select" title="Answer model">
+        <label className="chip chip--select scope__model" title="Answer model">
           <span className="sr-only">Answer model</span>
           <select value={model} onChange={(e) => setModel(e.target.value)} disabled={disabled}>
             {models.chat.map((m) => (

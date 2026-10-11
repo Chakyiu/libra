@@ -1,14 +1,16 @@
 //! Image generation (optional) — image/video *search* lives in `search`, this is generation.
 
 use crate::config::Config;
-use crate::error::LibraError;
 use crate::config::ProviderKind;
+use crate::error::LibraError;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub async fn generate(http: &Client, cfg: &Config, prompt: &str) -> Result<Value, LibraError> {
     if !cfg.image_generation_enabled {
-        return Err(LibraError::BadRequest("image generation is disabled".into()));
+        return Err(LibraError::BadRequest(
+            "image generation is disabled".into(),
+        ));
     }
     let llm = crate::llm::resolve_chat(cfg, http, &cfg.default_image_model)?;
     if llm.kind != ProviderKind::OpenAi {
@@ -42,7 +44,11 @@ pub async fn generate(http: &Client, cfg: &Config, prompt: &str) -> Result<Value
         provider: cfg.default_image_model.clone(),
         message: e.to_string(),
     })?;
-    let item = v["data"].as_array().and_then(|a| a.first()).cloned().unwrap_or(json!({}));
+    let item = v["data"]
+        .as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .unwrap_or(json!({}));
     Ok(json!({
         "url": item["url"],
         "b64": item["b64_json"],

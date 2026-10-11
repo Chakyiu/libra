@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Answer from "@/components/Answer";
 import { MediaStrip, Widget } from "@/components/Widgets";
 import { CopyIcon, DownloadIcon } from "@/components/icons";
@@ -34,6 +34,36 @@ function download(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function Thinking({ text, live }: { text: string; live: boolean }) {
+  const box = useRef<HTMLPreElement>(null);
+  const [open, setOpen] = useState(live);
+  const wasLive = useRef(live);
+  useLayoutEffect(() => {
+    if (wasLive.current !== live) {
+      wasLive.current = live;
+      setOpen(live);
+    }
+  }, [live]);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && open) el.scrollTop = el.scrollHeight;
+  }, [text, open]);
+  if (!text.trim()) return null;
+  return (
+    <details
+      className="think"
+      open={open}
+      onToggle={(e) => {
+        const next = e.currentTarget.open;
+        if (next !== open) setOpen(next);
+      }}
+    >
+      <summary>Thinking</summary>
+      <pre ref={box}>{text}</pre>
+    </details>
+  );
+}
+
 function Stages({ turn, count, onStop }: { turn: Turn; count: number; onStop: () => void }) {
   const p = turn.phase;
   const docs = turn.files.length > 0;
@@ -52,15 +82,17 @@ function Stages({ turn, count, onStop }: { turn: Turn; count: number; onStop: ()
     <div className="stages" aria-live="polite">
       <span className="stage" data-state={p === "search" ? "active" : "done"}>
         <i className="stage__led" />
-        {docs
-          ? "Searching your files"
-          : planning
-            ? "Deciding what to search"
-            : !found && research.step === "filter"
-              ? "Filtering sources"
-              : !found && research.step === "rerank"
-                ? "Reranking sources"
-                : "Searching the web"}
+        {turn.locating
+          ? "Getting your location"
+          : docs
+            ? "Searching your files"
+            : planning
+              ? "Deciding what to search"
+              : !found && research.step === "filter"
+                ? "Filtering sources"
+                : !found && research.step === "rerank"
+                  ? "Reranking sources"
+                  : "Searching the web"}
       </span>
       <span className="stage__sep">/</span>
       <span className="stage" data-state={p === "search" ? "idle" : p === "read" ? "active" : "done"}>
@@ -191,6 +223,7 @@ function TurnView({ turn, index, last, busy, fileNames, asked, minHeight, regist
           </ul>
         </div>
       )}
+      <Thinking text={turn.thought || ""} live={streaming} />
 
       {widgets.map((b, i) => (
         <Widget key={i} block={b} />

@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn contents(messages: &[Msg]) -> (Option<Value>, Vec<Value>) {
     let mut system: Option<String> = None;
@@ -9,7 +9,7 @@ fn contents(messages: &[Msg]) -> (Option<Value>, Vec<Value>) {
             "system" => system = Some(m.content.clone()),
             role => out.push(json!({
                 "role": if role == "assistant" { "model" } else { "user" },
-                "parts": [{ "text": m.content }],
+                "parts": gemini_parts(m),
             })),
         }
     }
@@ -55,10 +55,25 @@ fn urlencoded(s: &str) -> String {
     out
 }
 
-pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: ChatRequest, tx: StreamTx) {
-    let (http, base, key, model) = (http.clone(), base.to_string(), key.to_string(), model.to_string());
+pub fn spawn_stream(
+    http: &Client,
+    base: &str,
+    key: &str,
+    model: &str,
+    req: ChatRequest,
+    tx: StreamTx,
+) -> tokio::task::JoinHandle<()> {
+    let (http, base, key, model) = (
+        http.clone(),
+        base.to_string(),
+        key.to_string(),
+        model.to_string(),
+    );
     tokio::spawn(async move {
-        let u = format!("{}&alt=sse", url(&base, &key, &model, "streamGenerateContent"));
+        let u = format!(
+            "{}&alt=sse",
+            url(&base, &key, &model, "streamGenerateContent")
+        );
         let resp = match http.post(&u).json(&build_body(&req, true)).send().await {
             Ok(r) => r,
             Err(e) => {
@@ -74,11 +89,16 @@ pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: Chat
         let mut stream = resp.bytes_stream();
         let mut completed = false;
         while let Some(chunk) = stream.next().await {
+            if tx.is_closed() {
+                return;
+            }
             match chunk {
                 Ok(bytes) => {
                     let batch = parser.push(&bytes);
                     for data in batch.data {
-                        let Ok(v) = serde_json::from_str::<Value>(&data) else { continue };
+                        let Ok(v) = serde_json::from_str::<Value>(&data) else {
+                            continue;
+                        };
                         if let Some(err) = v.pointer("/error/message").and_then(|e| e.as_str()) {
                             let _ = tx.send(Delta::Error(err.to_string()));
                             return;
@@ -89,12 +109,21 @@ pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: Chat
                         {
                             completed = true;
                         }
-                        if let Some(parts) = v.pointer("/candidates/0/content/parts").and_then(|p| p.as_array()) {
+                        if let Some(parts) = v
+                            .pointer("/candidates/0/content/parts")
+                            .and_then(|p| p.as_array())
+                        {
                             for p in parts {
-                                if let Some(t) = p["text"].as_str() {
-                                    if !t.is_empty() {
-                                        let _ = tx.send(Delta::Text(t.to_string()));
-                                    }
+                                let Some(t) = p["text"].as_str().filter(|t| !t.is_empty()) else {
+                                    continue;
+                                };
+                                let delta = if p["thought"].as_bool().unwrap_or(false) {
+                                    Delta::Thought(t.to_string())
+                                } else {
+                                    Delta::Text(t.to_string())
+                                };
+                                if tx.send(delta).is_err() {
+                                    return;
                                 }
                             }
                         }
@@ -107,15 +136,27 @@ pub fn spawn_stream(http: &Client, base: &str, key: &str, model: &str, req: Chat
                     if completed {
                         return;
                     }
-                    let _ = tx.send(Delta::Error(format!("stream read failed: {}", error_detail(&e))));
+                    let _ = tx.send(Delta::Error(format!(
+                        "stream read failed: {}",
+                        error_detail(&e)
+                    )));
                     return;
                 }
             }
         }
-    });
+    })
 }
 
-pub async fn call(http: &Client, base: &str, key: &str, model: &str, system: &str, messages: &[Msg], json_mode: bool, max_tokens: Option<u32>) -> anyhow::Result<String> {
+pub async fn call(
+    http: &Client,
+    base: &str,
+    key: &str,
+    model: &str,
+    system: &str,
+    messages: &[Msg],
+    json_mode: bool,
+    max_tokens: Option<u32>,
+) -> anyhow::Result<String> {
     let mut msgs = vec![msg("system", system)];
     msgs.extend(messages.iter().cloned());
     let req = ChatRequest {
@@ -136,7 +177,13 @@ pub async fn call(http: &Client, base: &str, key: &str, model: &str, system: &st
     let text = v
         .pointer("/candidates/0/content/parts")
         .and_then(|p| p.as_array())
-        .map(|parts| parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(""))
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|p| p["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        })
         .unwrap_or_default();
     if text.is_empty() {
         anyhow::bail!("gemini returned no text: {}", v);
@@ -144,7 +191,13 @@ pub async fn call(http: &Client, base: &str, key: &str, model: &str, system: &st
     Ok(text)
 }
 
-pub async fn embed(http: &Client, base: &str, key: &str, model: &str, texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+pub async fn embed(
+    http: &Client,
+    base: &str,
+    key: &str,
+    model: &str,
+    texts: &[String],
+) -> anyhow::Result<Vec<Vec<f32>>> {
     let body = json!({
         "requests": texts.iter().map(|t| json!({
             "model": format!("models/{model}"),
@@ -152,7 +205,11 @@ pub async fn embed(http: &Client, base: &str, key: &str, model: &str, texts: &[S
             "outputType": "float_value",
         })).collect::<Vec<_>>()
     });
-    let resp = http.post(url(base, key, model, "batchEmbedContents")).json(&body).send().await?;
+    let resp = http
+        .post(url(base, key, model, "batchEmbedContents"))
+        .json(&body)
+        .send()
+        .await?;
     if !resp.status().is_success() {
         anyhow::bail!("{}", read_error_body(resp).await);
     }
@@ -160,6 +217,12 @@ pub async fn embed(http: &Client, base: &str, key: &str, model: &str, texts: &[S
     let arr = v["embeddings"].as_array().cloned().unwrap_or_default();
     Ok(arr
         .iter()
-        .filter_map(|e| e["values"].as_array().map(|vals| vals.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect()))
+        .filter_map(|e| {
+            e["values"].as_array().map(|vals| {
+                vals.iter()
+                    .filter_map(|x| x.as_f64().map(|f| f as f32))
+                    .collect()
+            })
+        })
         .collect())
 }

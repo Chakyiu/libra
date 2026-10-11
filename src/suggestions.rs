@@ -5,7 +5,11 @@ use crate::error::LibraError;
 use reqwest::Client;
 use serde_json::Value;
 
-pub async fn suggestions(http: &Client, cfg: &Config, query: &str) -> Result<Vec<String>, LibraError> {
+pub async fn suggestions(
+    http: &Client,
+    cfg: &Config,
+    query: &str,
+) -> Result<Vec<String>, LibraError> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }

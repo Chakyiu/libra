@@ -83,21 +83,6 @@ export const CompassIcon = icon(
   </>,
   { size: 14 },
 );
-export const ImageIcon = icon(
-  <>
-    <rect x="3.5" y="4.5" width="17" height="15" rx="1" />
-    <circle cx="9" cy="10" r="1.6" />
-    <path d="m20.5 16-5-5-8 8.5" />
-  </>,
-  { size: 14 },
-);
-export const VideoIcon = icon(
-  <>
-    <rect x="3.5" y="5.5" width="17" height="13" rx="1" />
-    <path d="m10.5 9.5 4 2.5-4 2.5v-5Z" />
-  </>,
-  { size: 14 },
-);
 export const GlobeIcon = icon(
   <>
     <circle cx="12" cy="12" r="9" />

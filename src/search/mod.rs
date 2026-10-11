@@ -20,7 +20,13 @@ pub trait SearchProvider: Send + Sync {
     fn search<'a>(
         &'a self,
         q: &'a SearchQuery,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, crate::error::ProviderError>> + Send + 'a>>;
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<SearchResponse, crate::error::ProviderError>>
+                + Send
+                + 'a,
+        >,
+    >;
 }
 
 pub(crate) fn urlencode(s: &str) -> String {
@@ -42,7 +48,9 @@ pub(crate) fn urldecode(s: &str) -> String {
         if b == b'%' {
             let hi = it.next().unwrap_or(b'0');
             let lo = it.next().unwrap_or(b'0');
-            out.push(u8::from_str_radix(&format!("{}{}", hi as char, lo as char), 16).unwrap_or(b'%'));
+            out.push(
+                u8::from_str_radix(&format!("{}{}", hi as char, lo as char), 16).unwrap_or(b'%'),
+            );
         } else if b == b'+' {
             out.push(b' ');
         } else {
@@ -58,11 +66,17 @@ pub(crate) fn select<'a>(doc: &'a scraper::Html, css: &str) -> Vec<scraper::Elem
         .unwrap_or_default()
 }
 
-pub(crate) fn parse_html<F: FnOnce(&scraper::Html) -> Vec<SearchResult>>(html: &str, f: F) -> Vec<SearchResult> {
+pub(crate) fn parse_html<F: FnOnce(&scraper::Html) -> Vec<SearchResult>>(
+    html: &str,
+    f: F,
+) -> Vec<SearchResult> {
     f(&scraper::Html::parse_document(html))
 }
 
-pub(crate) fn select_in<'a>(node: &scraper::ElementRef<'a>, css: &str) -> Vec<scraper::ElementRef<'a>> {
+pub(crate) fn select_in<'a>(
+    node: &scraper::ElementRef<'a>,
+    css: &str,
+) -> Vec<scraper::ElementRef<'a>> {
     scraper::Selector::parse(css)
         .map(|s| node.select(&s).collect())
         .unwrap_or_default()
@@ -74,7 +88,6 @@ pub(crate) fn text_of(node: &scraper::ElementRef, css: &str) -> String {
         .map(|n| n.text().collect::<Vec<_>>().join(" "))
         .unwrap_or_default()
 }
-
 
 /// Search hub: tries the configured provider order per search kind, caches results in Redis.
 pub struct SearchHub {
@@ -94,7 +107,11 @@ impl SearchHub {
             Arc::new(tavily::Tavily::new(http, cfg.clone())),
             Arc::new(firecrawl::Firecrawl::new(http, cfg.clone())),
         ];
-        Self { cfg, cache, providers }
+        Self {
+            cfg,
+            cache,
+            providers,
+        }
     }
 
     pub fn provider_names(&self) -> Vec<&'static str> {
@@ -111,13 +128,20 @@ impl SearchHub {
         }
         let response = self.run_uncached(kind, q, &cfg).await;
         if !response.results.is_empty() && cfg.search_cache_ttl_secs > 0 {
-            self.cache.set_json(&key, &response, cfg.search_cache_ttl_secs).await;
+            self.cache
+                .set_json(&key, &response, cfg.search_cache_ttl_secs)
+                .await;
         }
         response
     }
 
     /// Providers are tried in configured order; the first non-empty answer wins.
-    async fn run_uncached(&self, kind: SearchKind, q: &SearchQuery, cfg: &Config) -> SearchResponse {
+    async fn run_uncached(
+        &self,
+        kind: SearchKind,
+        q: &SearchQuery,
+        cfg: &Config,
+    ) -> SearchResponse {
         for name in cfg.search_order_for(kind) {
             let Some(provider) = self.providers.iter().find(|p| p.name() == name) else {
                 tracing::warn!(provider = name, "unknown search provider in order list");
@@ -132,7 +156,9 @@ impl SearchHub {
             match provider.search(q).await {
                 Ok(resp) if !resp.results.is_empty() => return resp,
                 Ok(_) => tracing::debug!(provider = name, "empty result set, falling through"),
-                Err(e) => tracing::warn!(provider = name, status = e.status, error = %e.message, "search provider failed"),
+                Err(e) => {
+                    tracing::warn!(provider = name, status = e.status, error = %e.message, "search provider failed")
+                }
             }
         }
         SearchResponse {

@@ -1,9 +1,9 @@
 use crate::config::SettingsHandle;
 use crate::error::ProviderError;
-use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
 use crate::search::SearchProvider;
+use crate::search::types::{SearchKind, SearchQuery, SearchResponse, SearchResult};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::pin::Pin;
 
 pub struct Firecrawl {
@@ -13,11 +13,12 @@ pub struct Firecrawl {
 
 impl Firecrawl {
     pub fn new(http: &Client, cfg: SettingsHandle) -> Self {
-        Self { http: http.clone(), cfg }
+        Self {
+            http: http.clone(),
+            cfg,
+        }
     }
-
 }
-
 
 impl SearchProvider for Firecrawl {
     fn name(&self) -> &'static str {
@@ -28,10 +29,18 @@ impl SearchProvider for Firecrawl {
         matches!(kind, SearchKind::Web | SearchKind::News)
     }
 
-    fn search<'a>(&'a self, q: &'a SearchQuery) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>> {
+    fn search<'a>(
+        &'a self,
+        q: &'a SearchQuery,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<SearchResponse, ProviderError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let cfg = self.cfg.get();
-            let source = if q.kind == SearchKind::News { "news" } else { "web" };
+            let source = if q.kind == SearchKind::News {
+                "news"
+            } else {
+                "web"
+            };
             let body = json!({
                 "query": q.query,
                 "limit": q.num_results,
@@ -39,7 +48,10 @@ impl SearchProvider for Firecrawl {
             });
             let resp = self
                 .http
-                .post(format!("{}/v2/search", cfg.firecrawl_url.trim_end_matches('/')))
+                .post(format!(
+                    "{}/v2/search",
+                    cfg.firecrawl_url.trim_end_matches('/')
+                ))
                 .header("Authorization", format!("Bearer {}", cfg.firecrawl_api_key))
                 .json(&body)
                 .send()

@@ -30,17 +30,41 @@ pub struct UploadStore {
 
 impl UploadStore {
     pub fn new(http: &Client, cfg: SettingsHandle, db: Arc<Db>, cache: Cache) -> Self {
-        Self { cfg, db, cache, http: http.clone() }
+        Self {
+            cfg,
+            db,
+            cache,
+            http: http.clone(),
+        }
     }
 
     /// Extract, chunk and embed a file; returns the number of chunks stored.
-    pub async fn ingest(&self, chat_id: &str, file_id: &str, filename: &str, bytes: &[u8]) -> Result<usize, LibraError> {
+    pub async fn ingest(
+        &self,
+        chat_id: &str,
+        file_id: &str,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<usize, LibraError> {
         let cfg = self.cfg.get();
+        // Images are stored whole. Running them through the text embedder treats the
+        // bytes as a document and the request sits there until the model gives up.
+        if let Some(mime) = image_mime(bytes) {
+            self.db
+                .save_image(chat_id, file_id, filename, mime, bytes, &cfg.now())
+                .await?;
+            return Ok(0);
+        }
+        if !is_document(filename) && looks_binary(bytes) {
+            return Err(LibraError::BadRequest(format!(
+                "{filename} has no readable text. Attach a text file, PDF, Word document, or an image."
+            )));
+        }
         let text = extract_text(filename, bytes);
         let chunks = split_text(&text);
-        if chunks.is_empty() {
+        if chunks.is_empty() || !readable(&text) {
             return Err(LibraError::BadRequest(format!(
-                "no readable text found in {filename} (supported: txt, md, csv, pdf, docx)"
+                "no readable text found in {filename} (supported: txt, md, csv, pdf, docx, and images)"
             )));
         }
         let llm_client = llm::resolve_embed(&cfg, &self.http, &cfg.default_embedding_model)?;
@@ -62,13 +86,31 @@ impl UploadStore {
                 embedding: embeddings.get(i).cloned().unwrap_or_default(),
             });
         }
-        self.db.save_file(chat_id, file_id, filename, &cfg.now()).await?;
+        self.db
+            .save_file(chat_id, file_id, filename, &cfg.now())
+            .await?;
         self.db.save_chunks(&rows).await?;
         Ok(rows.len())
     }
 
+    /// Image bytes for the selected attachments, in storage order. At most four.
+    pub async fn images_for(
+        &self,
+        file_ids: &[String],
+    ) -> Result<Vec<(String, Vec<u8>)>, LibraError> {
+        let mut images = self.db.images_for(file_ids).await?;
+        images.truncate(4);
+        Ok(images)
+    }
+
     /// Top-k chunks across the given files, ranked by cosine similarity to the query.
-    pub async fn retrieve(&self, chat_id: &str, file_ids: &[String], query: &str, limit: usize) -> Result<Vec<Chunk>, LibraError> {
+    pub async fn retrieve(
+        &self,
+        chat_id: &str,
+        file_ids: &[String],
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<Chunk>, LibraError> {
         let cfg = self.cfg.get();
         let rows = self.db.chunks_for_files(file_ids).await?;
         if rows.is_empty() {
@@ -104,18 +146,96 @@ impl UploadStore {
             .collect();
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         let _ = chat_id;
-        Ok(scored.into_iter().take(limit.max(1)).map(|(_, c)| c).collect())
+        Ok(scored
+            .into_iter()
+            .take(limit.max(1))
+            .map(|(_, c)| c)
+            .collect())
     }
+}
+
+/// png, jpeg, gif, webp, or bmp, from the file header.
+pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0x89, 0x50, 0x4E, 0x47, ..] => Some("image/png"),
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
+        [b'B', b'M', ..] => Some("image/bmp"),
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => Some("image/webp"),
+        _ => None,
+    }
+}
+
+fn is_document(filename: &str) -> bool {
+    matches!(
+        filename
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_lowercase()
+            .as_str(),
+        "txt"
+            | "md"
+            | "markdown"
+            | "csv"
+            | "tsv"
+            | "json"
+            | "log"
+            | "html"
+            | "htm"
+            | "xml"
+            | "rst"
+            | "yaml"
+            | "yml"
+            | "pdf"
+            | "docx"
+    )
+}
+
+fn looks_binary(bytes: &[u8]) -> bool {
+    let sample = &bytes[..bytes.len().min(8000)];
+    if sample.is_empty() {
+        return true;
+    }
+    let bad = sample.iter().filter(|b| **b == 0 || **b < 9).count();
+    bad * 20 > sample.len()
+}
+
+fn readable(text: &str) -> bool {
+    let sample: Vec<char> = text.trim().chars().take(4000).collect();
+    if sample.is_empty() {
+        return false;
+    }
+    let bad = sample
+        .iter()
+        .filter(|c| {
+            **c == '\u{FFFD}' || (c.is_control() && **c != '\n' && **c != '\r' && **c != '\t')
+        })
+        .count();
+    bad * 5 < sample.len()
 }
 
 pub fn extract_text(filename: &str, bytes: &[u8]) -> String {
     let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
-        "pdf" => pdf_extract::extract_text_from_mem(bytes)
-            .unwrap_or_else(|e| {
-                tracing::warn!("pdf parse failed for {filename}: {e}");
-                String::new()
-            }),
+        "pdf" => pdf_extract::extract_text_from_mem(bytes).unwrap_or_else(|e| {
+            tracing::warn!("pdf parse failed for {filename}: {e}");
+            String::new()
+        }),
         "docx" => docx_text(bytes).unwrap_or_default(),
         _ => String::from_utf8_lossy(bytes).into_owned(),
     }
@@ -194,7 +314,10 @@ mod tests {
         let chunks = split_text(&text);
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunks[0].chars().count(), 1200);
-        assert_eq!(chunks.iter().map(|c| c.chars().count()).sum::<usize>(), 3400); // overlap included
+        assert_eq!(
+            chunks.iter().map(|c| c.chars().count()).sum::<usize>(),
+            3400
+        ); // overlap included
     }
 
     #[test]
@@ -205,13 +328,29 @@ mod tests {
     }
 
     #[test]
+    fn image_headers_are_not_treated_as_text() {
+        let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+        assert_eq!(image_mime(&png), Some("image/png"));
+        assert_eq!(image_mime(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert!(looks_binary(&png));
+        assert!(!looks_binary(b"hello, a plain note\n"));
+        assert!(readable("hello, a plain note"));
+        assert!(!readable("\u{FFFD}\u{FFFD}\u{FFFD}\u{0000}"));
+    }
+
+    #[test]
     fn docx_text_extraction() {
         // minimal docx: one paragraph
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let opts: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
         w.start_file("word/document.xml", opts).unwrap();
         use std::write;
-        write!(w, "<w:document><w:p><w:t>Hello</w:t></w:p><w:p><w:t>World</w:t></w:p></w:document>").unwrap();
+        write!(
+            w,
+            "<w:document><w:p><w:t>Hello</w:t></w:p><w:p><w:t>World</w:t></w:p></w:document>"
+        )
+        .unwrap();
         let bytes = w.finish().unwrap().into_inner();
         assert_eq!(docx_text(&bytes).unwrap(), "Hello\nWorld\n");
     }

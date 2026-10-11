@@ -121,12 +121,20 @@ impl Config {
 
     fn defaults(data_dir: &PathBuf) -> Self {
         Self {
-            port: std::env::var("PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(3001),
+            port: std::env::var("PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3001),
             data_dir: data_dir.clone(),
             db_path: data_dir.join("libra.db"),
-            redis_url: std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
-            redis_enabled: std::env::var("REDIS_DISABLED").map(|v| v != "1").unwrap_or(true),
-            static_dir: PathBuf::from(std::env::var("LIBRA_STATIC_DIR").unwrap_or_else(|_| "web/out".into())),
+            redis_url: std::env::var("REDIS_URL")
+                .unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
+            redis_enabled: std::env::var("REDIS_DISABLED")
+                .map(|v| v != "1")
+                .unwrap_or(true),
+            static_dir: PathBuf::from(
+                std::env::var("LIBRA_STATIC_DIR").unwrap_or_else(|_| "web/out".into()),
+            ),
             // Model providers are whatever the user adds in Settings; a fresh instance has none.
             providers: vec![],
             default_model: String::new(),
@@ -135,11 +143,17 @@ impl Config {
             default_embedding_model: String::new(),
             default_image_model: String::new(),
             default_temperature: 0.3,
-            search_order_web: vec!["searxng".into(), "brave".into(), "duckduckgo".into(), "html-scrape".into()],
+            search_order_web: vec![
+                "searxng".into(),
+                "brave".into(),
+                "duckduckgo".into(),
+                "html-scrape".into(),
+            ],
             search_order_news: vec!["searxng".into(), "brave".into(), "duckduckgo".into()],
             search_order_images: vec!["searxng".into(), "brave".into(), "html-scrape".into()],
             search_order_videos: vec!["searxng".into()],
-            searxng_url: std::env::var("SEARXNG_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into()),
+            searxng_url: std::env::var("SEARXNG_API_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:8080".into()),
             searxng_user: std::env::var("SEARXNG_USER").unwrap_or_else(|_| "libra".into()),
             searxng_password: std::env::var("SEARXNG_PASSWORD").unwrap_or_default(),
             brave_api_key: String::new(),
@@ -163,9 +177,18 @@ impl Config {
             disabled_widgets: vec![],
             enabled_providers: vec![],
             host: std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into()),
-            request_timeout_secs: std::env::var("REQUEST_TIMEOUT_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(120),
-            search_cache_ttl_secs: std::env::var("SEARCH_CACHE_TTL").ok().and_then(|v| v.parse().ok()).unwrap_or(300),
-            max_upload_mb: std::env::var("MAX_UPLOAD_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(25),
+            request_timeout_secs: std::env::var("REQUEST_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(120),
+            search_cache_ttl_secs: std::env::var("SEARCH_CACHE_TTL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
+            max_upload_mb: std::env::var("MAX_UPLOAD_MB")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(25),
         }
     }
 
@@ -184,7 +207,10 @@ impl Config {
 
     pub fn save_settings_file(&self) -> anyhow::Result<()> {
         let value = self.settings_json();
-        std::fs::write(Self::settings_file(&self.data_dir), serde_json::to_string_pretty(&value)?)?;
+        std::fs::write(
+            Self::settings_file(&self.data_dir),
+            serde_json::to_string_pretty(&value)?,
+        )?;
         Ok(())
     }
 
@@ -231,14 +257,45 @@ impl Config {
     }
 
     pub fn apply_settings(&mut self, v: &serde_json::Value) {
-        macro_rules! s { ($k:expr, $f:expr) => { if let Some(x) = v[$k].as_str() { $f = x.to_string() } }; }
-        macro_rules! b { ($k:expr, $f:expr) => { if let Some(x) = v[$k].as_bool() { $f = x } }; }
-        macro_rules! n { ($k:expr, $f:expr) => { if let Some(x) = v[$k].as_u64() { $f = x as usize } }; }
-        macro_rules! list { ($k:expr, $f:expr) => {
-            if let Some(arr) = v[$k].as_array() { $f = arr.iter().filter_map(|x| x.as_str().map(String::from)).collect() }
-        }; }
+        macro_rules! s {
+            ($k:expr, $f:expr) => {
+                if let Some(x) = v[$k].as_str() {
+                    $f = x.to_string()
+                }
+            };
+        }
+        macro_rules! b {
+            ($k:expr, $f:expr) => {
+                if let Some(x) = v[$k].as_bool() {
+                    $f = x
+                }
+            };
+        }
+        macro_rules! n {
+            ($k:expr, $f:expr) => {
+                if let Some(x) = v[$k].as_u64() {
+                    $f = x as usize
+                }
+            };
+        }
+        macro_rules! list {
+            ($k:expr, $f:expr) => {
+                if let Some(arr) = v[$k].as_array() {
+                    $f = arr
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                }
+            };
+        }
 
-        macro_rules! f32v { ($k:expr, $f:expr) => { if let Some(x) = v[$k].as_f64() { $f = x as f32 } }; }
+        macro_rules! f32v {
+            ($k:expr, $f:expr) => {
+                if let Some(x) = v[$k].as_f64() {
+                    $f = x as f32
+                }
+            };
+        }
 
         s!("defaultModel", self.default_model);
         s!("defaultLightModel", self.default_light_model);
@@ -271,14 +328,19 @@ impl Config {
         list!("enabledProviders", self.enabled_providers);
 
         if let Some(arr) = v["providers"].as_array() {
-            if let Ok(parsed) = serde_json::from_value::<Vec<Provider>>(serde_json::Value::Array(arr.clone())) {
+            if let Ok(parsed) =
+                serde_json::from_value::<Vec<Provider>>(serde_json::Value::Array(arr.clone()))
+            {
                 self.providers = parsed;
             }
         }
         if let Some(order) = v["searchOrder"].as_object() {
             let pick = |k: &str, dest: &mut Vec<String>| {
                 if let Some(arr) = order.get(k).and_then(|o| o.as_array()) {
-                    *dest = arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+                    *dest = arr
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect();
                 }
             };
             pick("web", &mut self.search_order_web);
@@ -377,8 +439,15 @@ impl Config {
         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     }
 
+    /// Local date the models can use. Weekday, calendar date, clock, and offset.
+    pub fn today_line() -> String {
+        chrono::Local::now()
+            .format("%A, %d %B %Y, %H:%M UTC%:z")
+            .to_string()
+    }
+
     pub fn today(&self) -> String {
-        chrono::Local::now().format("%Y-%m-%d").to_string()
+        Self::today_line()
     }
 
     pub fn year(&self) -> String {
@@ -391,12 +460,24 @@ impl Config {
 }
 
 fn split_list(v: &str) -> Vec<String> {
-    v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    v.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn today_line_is_the_local_date() {
+        let line = Config::today_line();
+        let year = chrono::Local::now().format("%Y").to_string();
+        assert!(line.contains(&year), "{line}");
+        assert!(line.contains("UTC"), "{line}");
+        assert!(line.contains(','), "{line}");
+    }
 
     #[test]
     fn fresh_config_has_no_model_providers() {
@@ -414,7 +495,9 @@ mod tests {
             "base_url": "https://openrouter.ai/api/v1", "api_key": "",
             "models": ["anthropic/claude-3.5-sonnet"]
         }] }));
-        let (p, m) = cfg.resolve_model("openrouter/anthropic/claude-3.5-sonnet").unwrap();
+        let (p, m) = cfg
+            .resolve_model("openrouter/anthropic/claude-3.5-sonnet")
+            .unwrap();
         assert_eq!(p.id, "openrouter");
         assert_eq!(m, "anthropic/claude-3.5-sonnet");
         assert!(cfg.resolve_model("nope/model").is_none());
@@ -427,6 +510,9 @@ mod tests {
         cfg.apply_settings(&patch);
         assert_eq!(cfg.brave_api_key, "k");
         assert_eq!(cfg.num_web_results, 12);
-        assert_eq!(cfg.search_order_web, vec!["brave".to_string(), "searxng".to_string()]);
+        assert_eq!(
+            cfg.search_order_web,
+            vec!["brave".to_string(), "searxng".to_string()]
+        );
     }
 }

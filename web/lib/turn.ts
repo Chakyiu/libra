@@ -9,10 +9,14 @@ export type Turn = {
   question: string;
   askedAt: string | null;
   answer: string;
+  /** reasoning trace streamed ahead of the answer */
+  thought?: string;
   blocks: Block[];
   /** uploaded file ids the question was scoped to (document mode) */
   files: string[];
   phase: Phase;
+  /** The browser is resolving the user's place for this question. */
+  locating?: boolean;
   error?: string;
   startedAt?: number;
   elapsedMs?: number;
@@ -20,6 +24,29 @@ export type Turn = {
 };
 
 export const isStreaming = (p: Phase) => p === "search" || p === "read" || p === "write";
+
+export function phaseOf(status?: string | null): Phase {
+  switch (status) {
+    case "search":
+    case "read":
+    case "write":
+    case "stopped":
+    case "error":
+      return status;
+    default:
+      return "done";
+  }
+}
+
+function fill(turn: Turn, m: ChatMessage) {
+  turn.answer = m.content || (m.blocks ?? []).find((b) => b.type === "message")?.message || "";
+  turn.blocks = m.blocks ?? [];
+  turn.thought = (m.blocks ?? []).find((b) => b.type === "thought")?.message || "";
+  turn.phase = phaseOf(m.status);
+  if (m.error) turn.error = m.error;
+  if (m.model) turn.model = m.model;
+  if (m.elapsed_ms != null) turn.elapsedMs = m.elapsed_ms;
+}
 
 const WIDGETS = new Set(["widget", "weather", "stocks", "calculation", "time"]);
 
@@ -39,12 +66,12 @@ export function fromMessages(messages: ChatMessage[]): Turn[] {
       continue;
     }
     const last = turns[turns.length - 1];
-    const answer = m.content || (m.blocks ?? []).find((b) => b.type === "message")?.message || "";
     if (last && !last.answer && !last.blocks.length) {
-      last.answer = answer;
-      last.blocks = m.blocks ?? [];
+      fill(last, m);
     } else {
-      turns.push({ key: m.id, question: "", askedAt: m.created_at, answer, blocks: m.blocks ?? [], files: [], phase: "done" });
+      const turn: Turn = { key: m.id, question: "", askedAt: m.created_at, answer: "", blocks: [], files: [], phase: "done" };
+      fill(turn, m);
+      turns.push(turn);
     }
   }
   return turns;

@@ -3,13 +3,18 @@
 use crate::blocks::{Block, BlockType};
 use crate::config::Config;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub async fn current(http: &Client, cfg: &Config, location: &str, query: &str) -> Option<Block> {
     let place = if location.is_empty() { query } else { location };
     let geo: Value = http
         .get("https://geocoding-api.open-meteo.com/v1/search")
-        .query(&[("name", place), ("count", "1"), ("language", "en"), ("format", "json")])
+        .query(&[
+            ("name", place),
+            ("count", "1"),
+            ("language", "en"),
+            ("format", "json"),
+        ])
         .send()
         .await
         .ok()?
@@ -21,8 +26,103 @@ pub async fn current(http: &Client, cfg: &Config, location: &str, query: &str) -
     let first = geo["results"].as_array()?.first()?;
     let lat = first["latitude"].as_f64()?;
     let lon = first["longitude"].as_f64()?;
-    let name = format!("{}, {}", first["name"].as_str()?, first["country"].as_str().unwrap_or(""));
+    let name = format!(
+        "{}, {}",
+        first["name"].as_str()?,
+        first["country"].as_str().unwrap_or("")
+    );
+    forecast(http, cfg, lat, lon, &name).await
+}
 
+/// Forecast for coordinates the browser already resolved.
+pub async fn at(http: &Client, cfg: &Config, lat: f64, lon: f64, label: &str) -> Option<Block> {
+    let name = if label.trim().is_empty() {
+        format!("{lat:.2}, {lon:.2}")
+    } else {
+        label.trim().to_string()
+    };
+    forecast(http, cfg, lat, lon, &name).await
+}
+
+/// Place name for a browser fix. The timezone is filled only when the browser did not send one.
+pub async fn reverse_label(
+    http: &Client,
+    lat: f64,
+    lon: f64,
+    need_zone: bool,
+) -> Option<(String, String)> {
+    let lat_s = lat.to_string();
+    let lon_s = lon.to_string();
+    let label = place_name(http, &lat_s, &lon_s).await.unwrap_or_default();
+    let tz = if need_zone {
+        zone_at(http, &lat_s, &lon_s).await.unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if label.is_empty() && tz.is_empty() {
+        None
+    } else {
+        Some((label, tz))
+    }
+}
+
+async fn place_name(http: &Client, lat: &str, lon: &str) -> Option<String> {
+    let geo: Value = http
+        .get("https://api.bigdatacloud.net/data/reverse-geocode-client")
+        .query(&[
+            ("latitude", lat),
+            ("longitude", lon),
+            ("localityLanguage", "en"),
+        ])
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let city = geo["city"].as_str().unwrap_or("").trim();
+    let locality = geo["locality"].as_str().unwrap_or("").trim();
+    let country = geo["countryName"].as_str().unwrap_or("").trim();
+    let place = if !city.is_empty() { city } else { locality };
+    if place.is_empty() {
+        return None;
+    }
+    if country.is_empty() || country.eq_ignore_ascii_case(place) {
+        Some(place.to_string())
+    } else {
+        Some(format!("{place}, {country}"))
+    }
+}
+
+async fn zone_at(http: &Client, lat: &str, lon: &str) -> Option<String> {
+    let fc: Value = http
+        .get("https://api.open-meteo.com/v1/forecast")
+        .query(&[
+            ("latitude", lat),
+            ("longitude", lon),
+            ("current", "temperature_2m"),
+            ("timezone", "auto"),
+            ("forecast_days", "1"),
+        ])
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let tz = fc["timezone"].as_str().unwrap_or("").trim();
+    if tz.is_empty() {
+        None
+    } else {
+        Some(tz.to_string())
+    }
+}
+
+async fn forecast(http: &Client, cfg: &Config, lat: f64, lon: f64, name: &str) -> Option<Block> {
     let fc: Value = http
         .get("https://api.open-meteo.com/v1/forecast")
         .query(&[
@@ -42,7 +142,11 @@ pub async fn current(http: &Client, cfg: &Config, location: &str, query: &str) -
         .await
         .ok()?;
 
-    let unit = if cfg.units_imperial() { "fahrenheit" } else { "celsius" };
+    let unit = if cfg.units_imperial() {
+        "fahrenheit"
+    } else {
+        "celsius"
+    };
     let cur = &fc["current"];
     let days = json!({
         "time": fc["daily"]["time"],
@@ -54,7 +158,11 @@ pub async fn current(http: &Client, cfg: &Config, location: &str, query: &str) -
     let temp = cur["temperature_2m"].as_f64().unwrap_or(f64::NAN);
     Some(Block {
         block_type: BlockType::Weather,
-        message: format!("{name}: {}°{}", temp.round(), if unit == "fahrenheit" { "F" } else { "C" }),
+        message: format!(
+            "{name}: {}°{}",
+            temp.round(),
+            if unit == "fahrenheit" { "F" } else { "C" }
+        ),
         data: Some(json!({
             "location": name,
             "latitude": lat,

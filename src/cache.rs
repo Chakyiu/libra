@@ -1,7 +1,7 @@
-use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
-use serde::de::DeserializeOwned;
+use redis::aio::ConnectionManager;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 /// Redis is the hot path: search results, embeddings, config mirror, answer
@@ -50,10 +50,8 @@ impl Cache {
                 return Cache { inner: None };
             }
         };
-        let ping: redis::RedisResult<String> = redis::cmd("PING")
-            .arg("libra")
-            .query_async(&mut cm)
-            .await;
+        let ping: redis::RedisResult<String> =
+            redis::cmd("PING").arg("libra").query_async(&mut cm).await;
         match ping {
             Ok(_) => {
                 tracing::info!(url, "redis connected");
@@ -76,7 +74,9 @@ impl Cache {
     }
 
     pub async fn set_raw(&self, key: &str, value: &[u8], ttl: u64) {
-        let Some(mut c) = self.inner.clone() else { return };
+        let Some(mut c) = self.inner.clone() else {
+            return;
+        };
         let _: redis::RedisResult<()> = redis::cmd("SET")
             .arg(key)
             .arg(value)

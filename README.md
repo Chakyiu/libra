@@ -1,8 +1,9 @@
 # Libra
 
-A self-hosted answer engine — a rebuild of [Vane](https://github.com/ItzCrazyKns/Vane) with a
-**Rust + Redis + SQLite** backend and a **Next.js** frontend. One binary serves the API and the
-pre-built UI; Redis is a cache, not a requirement.
+A self-hosted answer engine, and a self-hosted Perplexity: ask in plain language and get a cited
+answer from the open web, on your own hardware. It is a rebuild of [Vane](https://github.com/ItzCrazyKns/Vane)
+with a **Rust + Redis + SQLite** backend and a **Next.js** frontend. One binary serves the API and
+the pre-built UI; Redis is a cache, not a requirement.
 
 ```
 question → classify → widgets ┐
@@ -76,21 +77,27 @@ docker/              searxng settings
 | | |
 |---|---|
 | `POST /api/ask` | SSE stream. Body `{id, query, model, models:{answer,light,rerank}, depth:fast\|balance\|deep, files:[id], message_history:[{role,content}], filters:{country,language,freshness,perplexity_site}, disabled_widgets:[]}`. `depth` defaults to balance. |
-| `GET /api/chats` · `POST /api/chats` | list / create |
-| `GET /api/chats/{id}` | `{chat, messages:[{id,role,content,blocks,files,created_at}]}` |
+| `GET /api/chats` · `POST /api/chats` | list / create. Each chat includes `status`, the phase of its latest answer |
+| `GET /api/chats/{id}` | `{chat, messages:[{id,role,content,blocks,files,status,error,model,elapsed_ms,created_at}]}` |
 | `PATCH /api/chats/{id}` | rename `{title, emoji}` · `DELETE` removes it |
+| `POST /api/chats/{id}/stop` | stop the answer in progress; the partial answer stays stored |
+| `POST /api/chats/{id}/location` | browser fix `{latitude, longitude, timezone, denied}` while an ask is waiting |
 | `POST /api/upload` | multipart `chatId` + `files[]` → `{files:[{id,name,chunks}]}` |
 | `GET /api/search?q=&kind=web\|news\|images\|videos` | raw provider results (Redis cached) |
 | `GET /api/suggestions?q=` | search autocomplete |
-| `GET /api/discover?chat_id=` | follow-up questions for a conversation |
+| `GET /api/discover?topic=tech\|finance\|art\|sports\|entertainment` | recent news for that topic; a story opens a thread that summarizes its URL |
 | `POST /api/generate/image` | `{prompt}` → base64 image (needs an image model) |
 | `GET /api/settings` · `PUT /api/settings` | read/patch the whole config, applied hot |
 | `GET /api/models` · `GET /api/health` | model ids · status + redis + providers |
 
-SSE frames are `data: {...}` with `type`: `id` (chat id), `b` (block), `a` (answer text delta),
-`c` (error), `e` (end). Blocks are `{type, message, data}` — `answered`, `widget`, `weather`,
+SSE frames are `data: {...}` with `type`: `id` (chat id), `b` (block), `t` (reasoning delta), `a` (answer text delta),
+`loc` (ask the browser for a location; `precise` true means coordinates), `c` (error), `e` (end). Blocks are `{type, message, data}` — `answered`, `widget`, `weather`,
 `stocks`, `calculation`, `time`, `research`, `references`, `images`, `videos`, `related`, `message`.
-The same blocks are persisted, so reloading a chat replays it exactly.
+The question is written to SQLite as soon as the ask starts, and the answer's phase
+(`search`, `read`, `write`, then `done`, `stopped`, or `error`), blocks, and text are
+updated as they arrive. Reloading the page restores that row immediately and keeps
+polling while the phase is still in progress. A process restart marks any in-progress
+turn stopped, so a thread is never stuck on "answering".
 
 ## Configuration
 

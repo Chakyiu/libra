@@ -3,18 +3,14 @@
 import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CloseIcon, CompassIcon, GearIcon, ImageIcon, Mark, MenuIcon, PlusIcon, VideoIcon } from "@/components/icons";
+import { CloseIcon, CompassIcon, GearIcon, Mark, MenuIcon, PlusIcon } from "@/components/icons";
 import { useInstance } from "@/components/instance";
 import { useShell } from "@/components/shell-context";
 import { useThreads } from "@/components/threads";
 import type { Chat } from "@/lib/api";
 import { Group, cleanTitle, groupOf, plural, threadTime, toDate } from "@/lib/format";
 
-const TOOLS = [
-  { href: "/discover/", label: "Discover", Icon: CompassIcon },
-  { href: "/images/", label: "Images", Icon: ImageIcon },
-  { href: "/videos/", label: "Videos", Icon: VideoIcon },
-];
+const TOOLS = [{ href: "/discover/", label: "Discover", Icon: CompassIcon }];
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -92,7 +88,10 @@ export default function Sidebar() {
               const known = live[chat.id];
               const title = cleanTitle(chat.title) || known?.question || "Untitled thread";
               const files = chat.files?.length ? plural(chat.files.length, "file") : "";
-              const meta = known?.answering ? "answering…" : [files, time].filter(Boolean).join(" · ");
+              const answering = known
+                ? known.answering
+                : chat.status === "search" || chat.status === "read" || chat.status === "write";
+              const meta = answering ? "answering…" : [files, time].filter(Boolean).join(" · ");
               return (
                 <div className="thread-row" key={chat.id}>
                   <Link className="thread" href={`/?chat=${chat.id}`} aria-current={chat.id === activeChat ? "page" : undefined}>

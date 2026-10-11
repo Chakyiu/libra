@@ -15,9 +15,15 @@ pub async fn quote(http: &Client, symbol: &str, query: &str) -> Option<Block> {
     if ticker.is_empty() || ticker.len() > 8 {
         return None;
     }
-    let code = if ticker.contains('.') { ticker.clone() } else { format!("{ticker}.us") };
+    let code = if ticker.contains('.') {
+        ticker.clone()
+    } else {
+        format!("{ticker}.us")
+    };
     let text = http
-        .get(format!("https://stooq.com/q/l/?s={code}&f=sd2t2ohlcv&h&e=csv"))
+        .get(format!(
+            "https://stooq.com/q/l/?s={code}&f=sd2t2ohlcv&h&e=csv"
+        ))
         .send()
         .await
         .ok()?

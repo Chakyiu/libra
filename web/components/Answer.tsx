@@ -62,6 +62,14 @@ function Anchor({ href, children, ...rest }: { href?: string; children?: React.R
   );
 }
 
+function Table(props: React.TableHTMLAttributes<HTMLTableElement>) {
+  return (
+    <div className="answer__table">
+      <table {...props} />
+    </div>
+  );
+}
+
 const OPTIONS: MarkdownToJSX.Options = {
   forceBlock: true,
   forceWrapper: true,
@@ -69,6 +77,7 @@ const OPTIONS: MarkdownToJSX.Options = {
   disableParsingRawHTML: true,
   overrides: {
     a: { component: Anchor },
+    table: { component: Table },
     img: { props: { loading: "lazy", referrerPolicy: "no-referrer" } },
   },
 };

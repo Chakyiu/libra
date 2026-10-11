@@ -1,7 +1,7 @@
 //! HTTP surface: JSON in, SSE out. One endpoint per frontend feature.
 
 use crate::error::{LibraError, LibraResult};
-use crate::pipeline::AskRequest;
+use crate::pipeline::{AskRequest, GeoFix};
 use crate::search::types::{SearchKind, SearchQuery};
 use crate::state::{App, Event};
 use axum::extract::{Multipart, Path, Query, State};
@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -24,7 +24,12 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/settings", get(get_settings).put(put_settings))
         .route("/models", get(models))
         .route("/chats", get(list_chats).post(create_chat))
-        .route("/chats/{id}", get(get_chat).delete(delete_chat).patch(rename_chat))
+        .route(
+            "/chats/{id}",
+            get(get_chat).delete(delete_chat).patch(rename_chat),
+        )
+        .route("/chats/{id}/stop", post(stop_chat))
+        .route("/chats/{id}/location", post(provide_location))
         .route("/ask", post(ask))
         .route("/upload", post(upload))
         .route("/search", get(search))
@@ -65,8 +70,12 @@ async fn get_settings(State(app): State<Arc<App>>) -> Json<Value> {
     Json(app.settings.get().settings_json())
 }
 
-async fn put_settings(State(app): State<Arc<App>>, Json(patch): Json<Value>) -> LibraResult<Json<Value>> {
-    let saved = crate::settings::apply_patch(&app.settings, &patch, std::path::Path::new(&app.db.path))?;
+async fn put_settings(
+    State(app): State<Arc<App>>,
+    Json(patch): Json<Value>,
+) -> LibraResult<Json<Value>> {
+    let saved =
+        crate::settings::apply_patch(&app.settings, &patch, std::path::Path::new(&app.db.path))?;
     Ok(Json(saved))
 }
 
@@ -87,9 +96,14 @@ async fn list_chats(State(app): State<Arc<App>>) -> LibraResult<Json<Value>> {
     Ok(Json(json!(chats)))
 }
 
-async fn create_chat(State(app): State<Arc<App>>, Query(q): Query<ChatQuery>) -> LibraResult<Json<Value>> {
+async fn create_chat(
+    State(app): State<Arc<App>>,
+    Query(q): Query<ChatQuery>,
+) -> LibraResult<Json<Value>> {
     let cfg = app.settings.get();
-    let id = q.chat_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let id = q
+        .chat_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let chat = app.db.create_chat(&id, &cfg.now()).await?;
     Ok(Json(json!(chat)))
 }
@@ -102,9 +116,48 @@ async fn get_chat(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraR
     Ok(Json(json!({ "chat": chat, "messages": messages })))
 }
 
-async fn delete_chat(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<StatusCode> {
+async fn delete_chat(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+) -> LibraResult<StatusCode> {
     app.db.delete_chat(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn stop_chat(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<StatusCode> {
+    app.pipeline.runs.cancel(&id);
+    app.db.mark_stopped(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct LocationBody {
+    #[serde(default)]
+    latitude: Option<f64>,
+    #[serde(default)]
+    longitude: Option<f64>,
+    #[serde(default)]
+    timezone: String,
+    #[serde(default)]
+    denied: bool,
+}
+
+/// The browser's answer to a location request on the ask stream.
+async fn provide_location(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Json(body): Json<LocationBody>,
+) -> StatusCode {
+    app.pipeline.provide_location(
+        &id,
+        GeoFix {
+            latitude: body.latitude.unwrap_or(f64::NAN),
+            longitude: body.longitude.unwrap_or(f64::NAN),
+            timezone: body.timezone,
+            denied: body.denied,
+        },
+    );
+    StatusCode::NO_CONTENT
 }
 
 #[derive(Deserialize)]
@@ -201,7 +254,10 @@ async fn upload(State(app): State<Arc<App>>, mut multipart: Multipart) -> LibraR
 
     let mut out = Vec::new();
     for (file_id, filename, bytes) in files {
-        let chunks = app.uploads.ingest(&chat_id, &file_id, &filename, &bytes).await?;
+        let chunks = app
+            .uploads
+            .ingest(&chat_id, &file_id, &filename, &bytes)
+            .await?;
         out.push(json!({ "id": file_id, "name": filename, "chunks": chunks }));
     }
     Ok(Json(json!({ "files": out })))
@@ -226,7 +282,10 @@ struct SearchParams {
     page: Option<usize>,
 }
 
-async fn search(State(app): State<Arc<App>>, Query(p): Query<SearchParams>) -> LibraResult<Json<Value>> {
+async fn search(
+    State(app): State<Arc<App>>,
+    Query(p): Query<SearchParams>,
+) -> LibraResult<Json<Value>> {
     let kind = SearchKind::parse(p.kind.as_deref().unwrap_or("web"));
     let mut query = SearchQuery {
         query: p.q,
@@ -238,7 +297,9 @@ async fn search(State(app): State<Arc<App>>, Query(p): Query<SearchParams>) -> L
         ..Default::default()
     };
     let response = app.search.run(kind, &mut query).await;
-    Ok(Json(serde_json::to_value(response).map_err(LibraError::any)?))
+    Ok(Json(
+        serde_json::to_value(response).map_err(LibraError::any)?,
+    ))
 }
 
 // ------------------------------------------------------- suggestions & co
@@ -256,13 +317,13 @@ async fn suggestions(State(app): State<Arc<App>>, Query(p): Query<Q>) -> LibraRe
 
 #[derive(Deserialize)]
 struct DiscoverQuery {
-    chat_id: String,
+    #[serde(default)]
+    topic: Option<String>,
 }
 
-async fn discover(State(app): State<Arc<App>>, Query(p): Query<DiscoverQuery>) -> LibraResult<Json<Value>> {
-    let cfg = app.settings.get();
-    let v = crate::discover::questions(&app.db, &app.cache, &app.http, &cfg, &p.chat_id).await?;
-    Ok(Json(v))
+async fn discover(State(app): State<Arc<App>>, Query(p): Query<DiscoverQuery>) -> Json<Value> {
+    let topic = p.topic.as_deref().unwrap_or("tech");
+    Json(crate::discover::articles(&app.search, &app.cache, topic).await)
 }
 
 #[derive(Deserialize)]
@@ -270,9 +331,11 @@ struct ImageBody {
     prompt: String,
 }
 
-async fn generate_image(State(app): State<Arc<App>>, Json(b): Json<ImageBody>) -> LibraResult<Json<Value>> {
+async fn generate_image(
+    State(app): State<Arc<App>>,
+    Json(b): Json<ImageBody>,
+) -> LibraResult<Json<Value>> {
     let cfg = app.settings.get();
     let v = crate::media::generate(&app.http, &cfg, &b.prompt).await?;
     Ok(Json(v))
 }
-
