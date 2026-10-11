@@ -116,7 +116,7 @@ export default function Scope({ files, selected, onSelect, onAttach, uploading, 
       />
       <label
         className="chip chip--select"
-        title="Fast decides one search and runs it. Balance does that, then searches again if something is missing. Deep runs three rounds."
+        title="The fast model plans the first search, then decides the next round from what came back. It drops sources that do not help, and the rerank model orders what is left. Fast is one round, Balance is two, Deep is three."
       >
         <span className="sr-only">Search depth</span>
         <select

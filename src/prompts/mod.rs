@@ -60,6 +60,24 @@ Today: {date}
 
 Return JSON only."#;
 
+pub const FILTER_SOURCES_SYSTEM: &str = r#"You drop search results that cannot help answer the question. You do not answer the question and you do not rank the ones you keep.
+
+Return ONLY valid JSON:
+{"keep": [1, 4, 7]}
+
+RULES:
+- Drop off-topic pages, generic homepages, cookie or login walls, and a result that only repeats a stronger source already in the list.
+- Keep a result when it could hold a fact, number, date, or disagreement the answer needs.
+- keep is 1-based indices. Never invent an index.
+- If every result is useful, keep them all."#;
+
+pub const FILTER_SOURCES_USER: &str = r#"Question: {query}
+
+Results:
+{results}
+
+Return JSON only."#;
+
 pub const RERANK_SYSTEM: &str = r#"You are a search result relevance judge. From the numbered results below, select the {num} most relevant to answering the query.
 
 Return ONLY valid JSON:
@@ -85,8 +103,8 @@ Return ONLY valid JSON:
 RULES:
 - queries are what you would type into a search engine: specific, in the user's language, each aimed at a different fact.
 - At most {n} queries. Never repeat a search that was already run.
-- Round 1: enough is false. Decide what to search before any results exist. Resolve pronouns from the conversation so each query stands alone.
-- Later rounds: you are shown titles and snippets already found. If they are enough to answer, return {"queries": [], "enough": true, "note": "..."}. Otherwise return new queries that fill a specific gap.
+- Round 1: enough is false. Think of the searches before any results exist. Resolve pronouns from the conversation so each query stands alone.
+- Later rounds: you are shown titles and snippets already found. Decide the next searches from those. If they are enough to answer, return {"queries": [], "enough": true, "note": "..."}. Otherwise return new queries that fill a specific gap.
 - note is at most 12 words.
 - Never answer the user's question."#;
 

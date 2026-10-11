@@ -211,10 +211,18 @@ impl Pipeline {
             }
         }
 
-        // 6. dedupe, merge, rerank
+        // 6. The fast model drops sources that cannot help. The rerank model then orders what remains.
         let mut candidates = dedupe(web.results, news.results);
-        let candidates_count = candidates.len();
-        if candidates_count > cfg.rerank_limit && cfg.enable_reranker {
+        if document_context.is_none() && cls.need_web_search && candidates.len() > 3 {
+            let note = Block::research(depth.as_str(), depth.rounds(), depth.rounds(), &[], "Filtering sources", "filter");
+            blocks.push(note.clone());
+            Self::emit_block(&tx, note);
+            candidates = filter_sources(&light_llm, &search_query, candidates).await;
+        }
+        if cfg.enable_reranker && candidates.len() > 1 {
+            let note = Block::research(depth.as_str(), depth.rounds(), depth.rounds(), &[], "Reranking sources", "rerank");
+            blocks.push(note.clone());
+            Self::emit_block(&tx, note);
             candidates = self.rerank(&rerank_llm, &search_query, candidates).await;
         }
         candidates.truncate(cfg.rerank_limit);
@@ -423,7 +431,7 @@ impl Pipeline {
                 break;
             }
 
-            let block = Block::research(depth.as_str(), round, depth.rounds(), &queries, &note);
+            let block = Block::research(depth.as_str(), round, depth.rounds(), &queries, &note, "search");
             blocks.push(block.clone());
             Self::emit_block(tx, block);
 
@@ -471,38 +479,24 @@ impl Pipeline {
 
     async fn rerank(&self, llm: &Llm, query: &str, results: Vec<SearchResult>) -> Vec<SearchResult> {
         let cfg = self.cfg.get();
-        let list = results
-            .iter()
-            .enumerate()
-            .map(|(i, r)| format!("[{}] {} — {}\n{}", i + 1, r.title, r.url, r.snippet))
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        let user = prompts::fill(
-            prompts::RERANK_USER,
-            &[("query", query), ("results", &list)],
-        );
+        let user = prompts::fill(prompts::RERANK_USER, &[("query", query), ("results", &numbered(&results))]);
         let system = prompts::fill(prompts::RERANK_SYSTEM, &[("num", &cfg.rerank_limit.to_string())]);
-        let Ok(v) = llm.json_call(&system, &user, None).await else {
-            return results;
+        let v = match llm.json_call(&system, &user, None).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    model = %llm.model,
+                    error = %crate::llm::error_detail(e.as_ref()),
+                    "rerank failed; keeping source order"
+                );
+                return results;
+            }
         };
         let Some(indices) = v["selected"].as_array() else {
             return results;
         };
-        let mut out = Vec::with_capacity(indices.len());
-        for idx in indices {
-            if let Some(i) = idx.as_u64().and_then(|i| usize::try_from(i).ok()).map(|i| i.saturating_sub(1)) {
-                if let Some(r) = results.get(i) {
-                    if !out.iter().any(|x: &SearchResult| x.url == r.url) {
-                        out.push(r.clone());
-                    }
-                }
-            }
-        }
-        if out.is_empty() {
-            results
-        } else {
-            out
-        }
+        let out = pick_indices(&results, indices);
+        if out.is_empty() { results } else { out }
     }
 
     async fn select_images(&self, llm: &Llm, query: &str, results: Vec<SearchResult>) -> Vec<SearchResult> {
@@ -672,6 +666,55 @@ async fn plan_queries(
     (take_queries(&v, depth.per_round(), asked), note)
 }
 
+/// The fast model throws away sources that cannot help, before the rerank model orders the rest.
+async fn filter_sources(llm: &Llm, query: &str, results: Vec<SearchResult>) -> Vec<SearchResult> {
+    let user = prompts::fill(
+        prompts::FILTER_SOURCES_USER,
+        &[("query", query), ("results", &numbered(&results))],
+    );
+    let v = match llm.json_call(prompts::FILTER_SOURCES_SYSTEM, &user, Some(500)).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                model = %llm.model,
+                provider = ?llm.kind,
+                error = %crate::llm::error_detail(e.as_ref()),
+                "source filter failed; keeping every result"
+            );
+            return results;
+        }
+    };
+    let Some(indices) = v["keep"].as_array() else {
+        tracing::warn!(model = %llm.model, "source filter returned no keep list; keeping every result");
+        return results;
+    };
+    let kept = pick_indices(&results, indices);
+    if kept.is_empty() { results } else { kept }
+}
+
+fn numbered(results: &[SearchResult]) -> String {
+    results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| format!("[{}] {} — {}\n{}", i + 1, r.title, r.url, r.snippet))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn pick_indices(results: &[SearchResult], indices: &[serde_json::Value]) -> Vec<SearchResult> {
+    let mut out = Vec::with_capacity(indices.len());
+    for idx in indices {
+        let Some(i) = idx.as_u64().and_then(|n| usize::try_from(n).ok()).map(|n| n.saturating_sub(1)) else {
+            continue;
+        };
+        let Some(r) = results.get(i) else { continue };
+        if !out.iter().any(|x: &SearchResult| x.url == r.url) {
+            out.push(r.clone());
+        }
+    }
+    out
+}
+
 fn query_key(q: &str) -> String {
     q.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
@@ -826,6 +869,14 @@ mod tests {
             url: url.into(),
             ..SearchResult::default()
         }
+    }
+
+    #[test]
+    fn pick_indices_keeps_order_and_skips_unknowns() {
+        let results = vec![hit("https://a.example"), hit("https://b.example"), hit("https://c.example")];
+        let kept = pick_indices(&results, &vec![json!(3), json!(1), json!(9), json!(1)]);
+        let urls: Vec<_> = kept.into_iter().map(|r| r.url).collect();
+        assert_eq!(urls, vec!["https://c.example".to_string(), "https://a.example".to_string()]);
     }
 
     #[test]

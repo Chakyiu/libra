@@ -74,6 +74,8 @@ export type Research = {
   round: number;
   rounds: number;
   queries: string[];
+  /** "search" while queries run, then "filter", then "rerank" */
+  step: string;
 };
 
 /** Queries the engine decided to run, in the order the rounds produced them. */
@@ -82,9 +84,11 @@ export function researchOf(blocks: Block[]): Research {
   let depth = "";
   let round = 0;
   let rounds = 0;
+  let step = "";
   for (const b of blocks) {
     if (b.type !== "research") continue;
     if (typeof b.data?.depth === "string") depth = b.data.depth;
+    if (typeof b.data?.step === "string") step = b.data.step;
     round = Number(b.data?.round) || round;
     rounds = Number(b.data?.rounds) || rounds;
     const list = Array.isArray(b.data?.queries) ? b.data.queries : [];
@@ -92,7 +96,7 @@ export function researchOf(blocks: Block[]): Research {
       if (typeof q === "string" && q && !queries.includes(q)) queries.push(q);
     }
   }
-  return { depth, round, rounds, queries };
+  return { depth, round, rounds, queries, step };
 }
 
 export type Stats = {

@@ -73,7 +73,7 @@ impl Block {
         }
     }
 
-    pub fn research(depth: &str, round: usize, rounds: usize, queries: &[String], note: &str) -> Self {
+    pub fn research(depth: &str, round: usize, rounds: usize, queries: &[String], note: &str, step: &str) -> Self {
         Self {
             block_type: BlockType::Research,
             message: note.to_string(),
@@ -82,6 +82,7 @@ impl Block {
                 "round": round,
                 "rounds": rounds,
                 "queries": queries,
+                "step": step,
             })),
             extra: None,
         }

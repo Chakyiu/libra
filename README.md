@@ -23,10 +23,10 @@ question → classify → widgets ┐
 | UI | full React app | lean Next.js app, statically exported and served by the Rust binary |
 
 The research loop is the main behavioural deviation: upstream drives a multi-iteration agent
-through native tool calls, which needs a strong model. Libra asks a light model what to search,
-runs those queries, and on Balance and Deep looks at what came back and searches again. Fast is
-one planned search. A cheap model then reranks and a stronger one writes. Pages are not scraped
-one by one.
+through native tool calls, which needs a strong model. Libra asks the fast model what to search first, runs those queries, then asks it what to search
+next. Balance does one follow-up round and Deep does two; Fast stops after the first. The fast
+model then drops sources that cannot help, the rerank model orders what remains, and a stronger
+model writes. Pages are not scraped one by one.
 
 ## Quickstart
 

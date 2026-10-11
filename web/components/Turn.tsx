@@ -52,7 +52,15 @@ function Stages({ turn, count, onStop }: { turn: Turn; count: number; onStop: ()
     <div className="stages" aria-live="polite">
       <span className="stage" data-state={p === "search" ? "active" : "done"}>
         <i className="stage__led" />
-        {docs ? "Searching your files" : planning ? "Deciding what to search" : "Searching the web"}
+        {docs
+          ? "Searching your files"
+          : planning
+            ? "Deciding what to search"
+            : !found && research.step === "filter"
+              ? "Filtering sources"
+              : !found && research.step === "rerank"
+                ? "Reranking sources"
+                : "Searching the web"}
       </span>
       <span className="stage__sep">/</span>
       <span className="stage" data-state={p === "search" ? "idle" : p === "read" ? "active" : "done"}>
