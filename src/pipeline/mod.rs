@@ -39,6 +39,9 @@ pub struct AskRequest {
     pub filters: Filters,
     #[serde(default)]
     pub disabled_widgets: Vec<String>,
+    /// "fast" | "balance" | "deep". Empty means balance.
+    #[serde(default)]
+    pub depth: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -183,14 +186,20 @@ impl Pipeline {
             None
         };
 
-        // 5. search
+        // 5. search. The light model decides the queries first, then runs one or more rounds.
         let mut web = SearchResponse::default();
         let mut news = SearchResponse::default();
         let mut images = SearchResponse::default();
         let mut videos = SearchResponse::default();
+        let depth = Depth::parse(&req.depth);
+        let mut search_queries: Vec<String> = Vec::new();
         if document_context.is_none() && cls.need_web_search {
+            let (results, queries) = self
+                .research(&light_llm, &req, &search_query, depth, &tx, &mut blocks)
+                .await;
+            search_queries = queries;
+            web.results = results;
             let mut base = self.base_query(&req, &search_query);
-            web = self.search.run(SearchKind::Web, &mut base.clone()).await;
             if cfg.enable_fresh_search && req.filters.freshness.as_deref().unwrap_or("noLimit") != "noLimit" {
                 news = self.search.run(SearchKind::News, &mut base.clone()).await;
             }
@@ -308,7 +317,9 @@ impl Pipeline {
                 "rerank_model": rerank_model,
                 "elapsed_ms": started.elapsed().as_millis(),
                 "sources": candidates.len(),
-                "search_query": search_query,
+                "search_query": search_queries.first().cloned().unwrap_or(search_query),
+                "search_queries": search_queries,
+                "depth": depth.as_str(),
             })),
             extra: None,
         });
@@ -376,6 +387,59 @@ impl Pipeline {
         let user = prompts::fill(prompts::CLASSIFY_USER, &[("query", &req.query), ("history", &history)]);
         let v = llm.json_call(prompts::CLASSIFY_SYSTEM, &user, None).await?;
         Ok(serde_json::from_value(v)?)
+    }
+
+    /// Think, then search. Fast is one round; balance is two; deep is three.
+    /// Each later round sees what the earlier searches returned and either stops or fills a gap.
+    async fn research(
+        &self,
+        llm: &Llm,
+        req: &AskRequest,
+        question: &str,
+        depth: Depth,
+        tx: &UnboundedSender<Event>,
+        blocks: &mut Vec<Block>,
+    ) -> (Vec<SearchResult>, Vec<String>) {
+        let cfg = self.cfg.get();
+        let per_query = match depth {
+            Depth::Fast => cfg.num_web_results,
+            Depth::Balance => cfg.num_web_results.min(12),
+            Depth::Deep => cfg.num_web_results.min(8),
+        }
+        .max(1);
+        let mut buckets: Vec<Vec<SearchResult>> = Vec::new();
+        let mut asked: Vec<String> = Vec::new();
+        let history = history_text(&req.message_history);
+
+        for round in 1..=depth.rounds() {
+            let found = findings_brief(&merge_buckets(&buckets));
+            let (queries, note) = plan_queries(llm, question, &history, depth, round, &asked, &found).await;
+            let queries = if queries.is_empty() && round == 1 {
+                vec![question.to_string()]
+            } else {
+                queries
+            };
+            if queries.is_empty() {
+                break;
+            }
+
+            let block = Block::research(depth.as_str(), round, depth.rounds(), &queries, &note);
+            blocks.push(block.clone());
+            Self::emit_block(tx, block);
+
+            for q in &queries {
+                let mut base = self.base_query(req, q);
+                base.num_results = per_query;
+                let res = self.search.run(SearchKind::Web, &mut base).await;
+                buckets.push(res.results);
+                asked.push(q.clone());
+            }
+        }
+
+        // Keep a mix of every round. A plain truncate would keep only the first query's hits.
+        let mut results = merge_buckets(&buckets);
+        results.truncate(24);
+        (results, asked)
     }
 
     async fn rewrite_followup(&self, llm: &Llm, req: &AskRequest) -> Option<String> {
@@ -521,6 +585,154 @@ fn msg(role: &str, content: impl Into<String>) -> Msg {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Depth {
+    Fast,
+    Balance,
+    Deep,
+}
+
+impl Depth {
+    fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "fast" => Self::Fast,
+            "deep" => Self::Deep,
+            _ => Self::Balance,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Balance => "balance",
+            Self::Deep => "deep",
+        }
+    }
+
+    /// How many times the engine may think, then search.
+    fn rounds(self) -> usize {
+        match self {
+            Self::Fast => 1,
+            Self::Balance => 2,
+            Self::Deep => 3,
+        }
+    }
+
+    fn per_round(self) -> usize {
+        match self {
+            Self::Fast => 1,
+            Self::Balance => 2,
+            Self::Deep => 3,
+        }
+    }
+}
+
+async fn plan_queries(
+    llm: &Llm,
+    question: &str,
+    history: &str,
+    depth: Depth,
+    round: usize,
+    asked: &[String],
+    found: &str,
+) -> (Vec<String>, String) {
+    let asked_text = if asked.is_empty() {
+        "(none yet)".to_string()
+    } else {
+        asked.iter().map(|q| format!("- {q}")).collect::<Vec<_>>().join("\n")
+    };
+    let system = prompts::fill(prompts::PLAN_SEARCH_SYSTEM, &[("n", &depth.per_round().to_string())]);
+    let user = prompts::fill(
+        prompts::PLAN_SEARCH_USER,
+        &[
+            ("query", question),
+            ("history", history),
+            ("round", &round.to_string()),
+            ("rounds", &depth.rounds().to_string()),
+            ("asked", &asked_text),
+            ("found", found),
+        ],
+    );
+    let v = match llm.json_call(&system, &user, Some(500)).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                model = %llm.model,
+                provider = ?llm.kind,
+                error = %crate::llm::error_detail(e.as_ref()),
+                "search plan failed; the light model could not choose queries, so round {round} searches the question itself"
+            );
+            return (Vec::new(), String::new());
+        }
+    };
+    let note = v["note"].as_str().unwrap_or("").trim().to_string();
+    if round > 1 && v["enough"].as_bool().unwrap_or(false) {
+        return (Vec::new(), note);
+    }
+    (take_queries(&v, depth.per_round(), asked), note)
+}
+
+fn query_key(q: &str) -> String {
+    q.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Keep the first `limit` new search strings. Drops blanks, repeats, and anything already run.
+fn take_queries(raw: &serde_json::Value, limit: usize, already: &[String]) -> Vec<String> {
+    let mut seen: HashSet<String> = already.iter().map(|q| query_key(q)).filter(|k| !k.is_empty()).collect();
+    let mut out = Vec::new();
+    let Some(arr) = raw.get("queries").and_then(|v| v.as_array()) else {
+        return out;
+    };
+    for q in arr {
+        let Some(s) = q.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let s: String = s.chars().take(180).collect();
+        let key = query_key(&s);
+        if key.is_empty() || !seen.insert(key) {
+            continue;
+        }
+        out.push(s);
+        if out.len() == limit {
+            break;
+        }
+    }
+    out
+}
+
+/// Round-robin across queries so a later round is not dropped when the list is capped.
+fn merge_buckets(buckets: &[Vec<SearchResult>]) -> Vec<SearchResult> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    let max = buckets.iter().map(|b| b.len()).max().unwrap_or(0);
+    for i in 0..max {
+        for bucket in buckets {
+            let Some(r) = bucket.get(i) else { continue };
+            let key = normalize_url(&r.url);
+            if key.is_empty() || seen.insert(key) {
+                out.push(r.clone());
+            }
+        }
+    }
+    out
+}
+
+fn findings_brief(results: &[SearchResult]) -> String {
+    if results.is_empty() {
+        return "(nothing yet)".into();
+    }
+    results
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(i, r)| {
+            let snip: String = r.snippet.chars().take(160).collect();
+            format!("[{}] {} — {}\n{snip}", i + 1, r.title, r.url)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 fn history_text(history: &[Msg]) -> String {
     if history.is_empty() {
         return "(none)".into();
@@ -601,5 +813,55 @@ pub async fn title_and_emoji(cfg: &Config, http: &reqwest::Client, db: &Db, chat
     let emoji = v["emoji"].as_str().unwrap_or("🔍").to_string();
     db.rename_chat(chat_id, &title, &emoji).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn hit(url: &str) -> SearchResult {
+        SearchResult {
+            title: url.into(),
+            url: url.into(),
+            ..SearchResult::default()
+        }
+    }
+
+    #[test]
+    fn depth_defaults_to_balance() {
+        assert_eq!(Depth::parse(""), Depth::Balance);
+        assert_eq!(Depth::parse("FAST"), Depth::Fast);
+        assert_eq!(Depth::parse("deep"), Depth::Deep);
+        assert_eq!(Depth::Fast.rounds(), 1);
+        assert_eq!(Depth::Balance.rounds(), 2);
+        assert_eq!(Depth::Deep.per_round(), 3);
+    }
+
+    #[test]
+    fn take_queries_caps_and_skips_repeats() {
+        let raw = json!({
+            "queries": ["nginx 1.30.1", "  ", "Nginx   1.30.1", "rhel 9 nginx", "extra", "fourth"]
+        });
+        let got = take_queries(&raw, 2, &["nginx 1.30.1".into()]);
+        assert_eq!(got, vec!["rhel 9 nginx".to_string(), "extra".to_string()]);
+    }
+
+    #[test]
+    fn merge_buckets_interleaves_rounds() {
+        let buckets = vec![
+            vec![hit("https://a.example/1"), hit("https://a.example/2")],
+            vec![hit("https://b.example/1"), hit("https://a.example/1")],
+        ];
+        let urls: Vec<_> = merge_buckets(&buckets).into_iter().map(|r| r.url).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://a.example/1".to_string(),
+                "https://b.example/1".to_string(),
+                "https://a.example/2".to_string(),
+            ]
+        );
+    }
 }
 

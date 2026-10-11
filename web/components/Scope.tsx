@@ -6,6 +6,7 @@ import { useAnswerModel, useInstance } from "@/components/instance";
 import { useThreads } from "@/components/threads";
 import { FileRef, ensureChat, uploadFiles } from "@/lib/api";
 import { modelLabel } from "@/lib/format";
+import { setPref, usePref } from "@/lib/prefs";
 
 /**
  * Files attached to a thread and which of them the next question is scoped to.
@@ -61,6 +62,7 @@ export default function Scope({ files, selected, onSelect, onAttach, uploading, 
   const input = useRef<HTMLInputElement>(null);
   const { models } = useInstance();
   const [model, setModel] = useAnswerModel();
+  const depth = usePref("depth");
   const toggle = (id: string) => onSelect(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
 
   return (
@@ -112,6 +114,25 @@ export default function Scope({ files, selected, onSelect, onAttach, uploading, 
           onAttach(picked);
         }}
       />
+      <label
+        className="chip chip--select"
+        title="Fast decides one search and runs it. Balance does that, then searches again if something is missing. Deep runs three rounds."
+      >
+        <span className="sr-only">Search depth</span>
+        <select
+          value={depth}
+          disabled={disabled}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "fast" || v === "balance" || v === "deep") setPref("depth", v);
+          }}
+        >
+          <option value="fast">Fast search</option>
+          <option value="balance">Balance search</option>
+          <option value="deep">Deep search</option>
+        </select>
+        <ChevronDownIcon />
+      </label>
       {models.chat.length > 0 && (
         <label className="chip chip--select" title="Answer model">
           <span className="sr-only">Answer model</span>

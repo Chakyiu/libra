@@ -6,8 +6,8 @@ pre-built UI; Redis is a cache, not a requirement.
 
 ```
 question → classify → widgets ┐
-         → rewrite follow-up  ├→ SSE stream → answer with [n] citations → follow-ups
-         → search / doc RAG   ┘
+         → plan searches      ├→ SSE stream → answer with [n] citations → follow-ups
+         → search rounds / RAG┘
 ```
 
 ## Why this shape
@@ -17,15 +17,16 @@ question → classify → widgets ┐
 | backend | Next.js (Node) | Rust (axum), single static binary |
 | storage | SQLite (drizzle) | SQLite (sqlx, WAL) |
 | cache | none | Redis: search results, embeddings, discover, single-flight |
-| research loop | native tool-calling, 2–25 iterations | one structured-JSON plan per question |
+| research loop | native tool-calling, 2–25 iterations | plan the queries, then 1, 2, or 3 search rounds (fast, balance, deep) |
 | providers | OpenAI/Anthropic/Gemini/Groq/Ollama/… | OpenAI-compatible (incl. OpenRouter, Ollama, LM Studio), Anthropic, Gemini |
 | search | SearxNG only | SearxNG, Brave, Tavily, Exa, DuckDuckGo, Bing HTML scrape, Firecrawl — per-kind ordered fallback |
 | UI | full React app | lean Next.js app, statically exported and served by the Rust binary |
 
 The research loop is the main behavioural deviation: upstream drives a multi-iteration agent
-through native tool calls, which needs a strong model. Libra classifies, picks widgets,
-searches once across providers, reranks with a cheap model, then writes. That keeps latency low
-and works with small local models. It is a deliberate trade-off, not a missing feature.
+through native tool calls, which needs a strong model. Libra asks a light model what to search,
+runs those queries, and on Balance and Deep looks at what came back and searches again. Fast is
+one planned search. A cheap model then reranks and a stronger one writes. Pages are not scraped
+one by one.
 
 ## Quickstart
 
@@ -62,7 +63,7 @@ src/
   blocks.rs          block protocol streamed to the UI
   llm/               openai-compatible, anthropic, gemini; SSE + JSON extraction
   search/            provider trait + 7 providers + fallback router with Redis cache
-  pipeline/          ask(): classify → widgets → search → rerank → answer → suggestions
+  pipeline/          ask(): classify → widgets → plan searches → search rounds → rerank → answer → suggestions
   uploads/           text/pdf/docx extraction, chunking, embedding, cosine retrieval
   widgets/           calculator, time, weather (Open-Meteo), stocks (stooq)
   prompts/           every LLM prompt, all returning strict JSON
@@ -74,7 +75,7 @@ docker/              searxng settings
 
 | | |
 |---|---|
-| `POST /api/ask` | SSE stream. Body `{id, query, model, models:{answer,light,rerank}, files:[id], message_history:[{role,content}], filters:{country,language,freshness,perplexity_site}, disabled_widgets:[]}` |
+| `POST /api/ask` | SSE stream. Body `{id, query, model, models:{answer,light,rerank}, depth:fast\|balance\|deep, files:[id], message_history:[{role,content}], filters:{country,language,freshness,perplexity_site}, disabled_widgets:[]}`. `depth` defaults to balance. |
 | `GET /api/chats` · `POST /api/chats` | list / create |
 | `GET /api/chats/{id}` | `{chat, messages:[{id,role,content,blocks,files,created_at}]}` |
 | `PATCH /api/chats/{id}` | rename `{title, emoji}` · `DELETE` removes it |
@@ -88,7 +89,7 @@ docker/              searxng settings
 
 SSE frames are `data: {...}` with `type`: `id` (chat id), `b` (block), `a` (answer text delta),
 `c` (error), `e` (end). Blocks are `{type, message, data}` — `answered`, `widget`, `weather`,
-`stocks`, `calculation`, `time`, `references`, `images`, `videos`, `related`, `message`.
+`stocks`, `calculation`, `time`, `research`, `references`, `images`, `videos`, `related`, `message`.
 The same blocks are persisted, so reloading a chat replays it exactly.
 
 ## Configuration
@@ -114,8 +115,7 @@ enough to exercise the whole pipeline end to end.
 
 ## Not implemented (yet)
 
-- Multi-iteration agentic research (plan → search → scrape → plan again) and per-result page
-  extraction: Firecrawl's scrape endpoint is implemented but not wired into the answer path.
+- Per-result page extraction: Firecrawl's scrape endpoint is implemented but not wired into the answer path.
 - Currency conversion in the calculator, and the upstream "discussion mode" long-form writer.
 - Auth: the service is assumed to sit behind a reverse proxy. CORS is wide open for dev.
 - Embedding search is brute-force cosine over SQLite BLOBs — fine up to a few thousand chunks.

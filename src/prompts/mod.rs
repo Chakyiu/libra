@@ -77,6 +77,33 @@ Results:
 
 Return JSON only."#;
 
+pub const PLAN_SEARCH_SYSTEM: &str = r#"You plan web searches for a research assistant. You do not answer the question.
+
+Return ONLY valid JSON:
+{"queries": ["search query"], "enough": false, "note": "why these searches"}
+
+RULES:
+- queries are what you would type into a search engine: specific, in the user's language, each aimed at a different fact.
+- At most {n} queries. Never repeat a search that was already run.
+- Round 1: enough is false. Decide what to search before any results exist. Resolve pronouns from the conversation so each query stands alone.
+- Later rounds: you are shown titles and snippets already found. If they are enough to answer, return {"queries": [], "enough": true, "note": "..."}. Otherwise return new queries that fill a specific gap.
+- note is at most 12 words.
+- Never answer the user's question."#;
+
+pub const PLAN_SEARCH_USER: &str = r#"Question: {query}
+
+Conversation so far:
+{history}
+
+Round {round} of {rounds}.
+Searches already run:
+{asked}
+
+What those searches found:
+{found}
+
+Return JSON only."#;
+
 pub const DETERMINE_FOLLOWUP_SYSTEM: &str = r#"You decide whether a follow-up question needs the previous conversation to be understood, and rewrite it into a standalone search query.
 
 Return ONLY valid JSON:

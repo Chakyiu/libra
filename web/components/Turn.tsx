@@ -7,7 +7,7 @@ import { CopyIcon, DownloadIcon } from "@/components/icons";
 import type { SearchResult } from "@/lib/api";
 import { answerMarkdown } from "@/lib/cite";
 import { askedAt, modelLabel, plural, sameQuestionKey, seconds, slug, toDate } from "@/lib/format";
-import { Turn, hasReferences, isStreaming, mediaOf, relatedOf, sourcesOf, statsOf, widgetsOf } from "@/lib/turn";
+import { Turn, hasReferences, isStreaming, mediaOf, relatedOf, researchOf, sourcesOf, statsOf, widgetsOf } from "@/lib/turn";
 
 async function copyText(text: string) {
   try {
@@ -40,6 +40,9 @@ function Stages({ turn, count, onStop }: { turn: Turn; count: number; onStop: ()
   const found = hasReferences(turn.blocks);
   const skipped = turn.blocks.some((b) => b.type === "answered" && b.data?.need_web_search === false);
 
+  const research = researchOf(turn.blocks);
+  const planning = p === "search" && !docs && !skipped && research.queries.length === 0;
+
   let reading = "Reading sources";
   if (docs) reading = p === "write" ? "Read your files" : "Reading your files";
   else if (found && count === 0) reading = skipped ? "No search needed" : "No sources found";
@@ -49,7 +52,7 @@ function Stages({ turn, count, onStop }: { turn: Turn; count: number; onStop: ()
     <div className="stages" aria-live="polite">
       <span className="stage" data-state={p === "search" ? "active" : "done"}>
         <i className="stage__led" />
-        {docs ? "Searching your files" : "Searching the web"}
+        {docs ? "Searching your files" : planning ? "Deciding what to search" : "Searching the web"}
       </span>
       <span className="stage__sep">/</span>
       <span className="stage" data-state={p === "search" ? "idle" : p === "read" ? "active" : "done"}>
@@ -118,6 +121,8 @@ function TurnView({ turn, index, last, busy, fileNames, asked, minHeight, regist
   const images = mediaOf(turn.blocks, "images");
   const videos = mediaOf(turn.blocks, "videos");
   const docs = turn.files.length > 0;
+  const research = researchOf(turn.blocks);
+  const depthName = research.depth === "fast" ? "Fast" : research.depth === "deep" ? "Deep" : research.depth ? "Balance" : "";
   const Question = index === 0 ? "h1" : "h2";
 
   const cite = useCallback((n: number) => onCite(index, n), [onCite, index]);
@@ -148,10 +153,16 @@ function TurnView({ turn, index, last, busy, fileNames, asked, minHeight, regist
                 {stats.model ? ` · ${modelLabel(stats.model)}` : ""}
               </span>
             )}
-            {searched && (
-              <span className="meta" title="What the engine searched for">
-                searched “{searched}”
+            {research.queries.length > 0 ? (
+              <span className="meta" title={research.queries.join("\n")}>
+                {depthName} · {plural(research.queries.length, "search")}
               </span>
+            ) : (
+              searched && (
+                <span className="meta" title="What the engine searched for">
+                  searched “{searched}”
+                </span>
+              )
             )}
             {turn.phase === "stopped" && <span className="meta">stopped early</span>}
           </div>
@@ -159,6 +170,19 @@ function TurnView({ turn, index, last, busy, fileNames, asked, minHeight, regist
       </header>
 
       {streaming && <Stages turn={turn} count={sources.length} onStop={onStop} />}
+      {streaming && research.queries.length > 0 && (
+        <div className="research">
+          <p className="kicker">
+            {depthName}
+            {research.rounds > 1 ? ` · round ${research.round} of ${research.rounds}` : ""}
+          </p>
+          <ul>
+            {research.queries.map((q) => (
+              <li key={q}>{q}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {widgets.map((b, i) => (
         <Widget key={i} block={b} />

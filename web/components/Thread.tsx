@@ -11,12 +11,13 @@ import { ArrowIcon, ChevronUpIcon, RailIcon, RerunIcon } from "@/components/icon
 import { useAnswerModel, useInstance } from "@/components/instance";
 import { isTyping } from "@/components/shell-context";
 import { useThreads } from "@/components/threads";
-import { ApiError, Chat, ChatMessage, api, ask, uuid } from "@/lib/api";
+import { ApiError, Chat, ChatMessage, api } from "@/lib/api";
 import { citationsIn } from "@/lib/cite";
 import { cleanTitle, sameQuestionKey } from "@/lib/format";
 import { clearHandoff, peekHandoff } from "@/lib/handoff";
 import { flash, hover } from "@/lib/lit";
-import { useMedia, usePref } from "@/lib/prefs";
+import { getPref, useMedia, usePref } from "@/lib/prefs";
+import { adoptHistory, getRun, startRun, stopRun, subscribeRun } from "@/lib/runs";
 import { kindOf } from "@/lib/sources";
 import { Turn, fromMessages, hasReferences, isStreaming, sourcesOf } from "@/lib/turn";
 
@@ -138,12 +139,13 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
 
   // a question asked from home arrives with its files and no history to load
   const [handoff] = useState(() => peekHandoff(chatId));
-  const [status, setStatus] = useState<Status>(handoff ? "ready" : "loading");
+  const [resumed] = useState(() => getRun(chatId));
+  const [status, setStatus] = useState<Status>(handoff || resumed?.turns.length ? "ready" : "loading");
   const [loadError, setLoadError] = useState("");
   const [chat, setChat] = useState<Chat | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [active, setActive] = useState(0);
+  const [turns, setTurns] = useState<Turn[]>(resumed?.turns ?? []);
+  const [busy, setBusy] = useState(resumed?.busy ?? false);
+  const [active, setActive] = useState(resumed?.turns.length ? resumed.turns.length - 1 : 0);
   const [kind, setKind] = useState<KindFilter>("all");
   const [railOpen, setRailOpen] = useState(true);
   const [sheet, setSheet] = useState<SheetState>("closed");
@@ -153,7 +155,6 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
   const scroller = useRef<HTMLDivElement>(null);
   const railScroller = useRef<HTMLDivElement>(null);
   const turnEls = useRef(new Map<string, HTMLElement>());
-  const abort = useRef<AbortController | null>(null);
   const seeded = useRef(false);
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
@@ -165,88 +166,23 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
   useEffect(() => setRailOpen(railDefault), [railDefault]);
 
   const send = useCallback(
-    async (q: string, fileIds: string[]) => {
-      const question = q.trim();
-      if (!question || abort.current) return;
-      const prior = turnsRef.current;
-      const history = prior
-        .filter((t) => t.answer.trim())
-        .slice(-3)
-        .flatMap((t) => [
-          { role: "user", content: t.question },
-          { role: "assistant", content: t.answer },
-        ]);
-      const key = uuid();
-      const started = performance.now();
-      setTurns((ts) => [
-        ...ts,
-        { key, question, askedAt: new Date().toISOString(), answer: "", blocks: [], files: fileIds, phase: "search", startedAt: started, model },
-      ]);
-      setActive(prior.length);
+    (q: string, fileIds: string[]) => {
+      const prior = turnsRef.current.length;
+      const key = startRun({
+        chatId,
+        question: q,
+        fileIds,
+        model,
+        depth: getPref("depth"),
+        prior: turnsRef.current,
+        reload,
+        settle,
+        setLive,
+      });
+      if (!key) return;
+      setActive(prior);
       setScrollTarget(key);
       setSheet("closed");
-      setBusy(true);
-      const first = prior[0]?.question ?? question;
-      setLive(chatId, { question: first, answering: true });
-
-      const ctrl = new AbortController();
-      abort.current = ctrl;
-      const patch = (fn: (t: Turn) => Turn) => setTurns((ts) => ts.map((t) => (t.key === key ? fn(t) : t)));
-
-      // answer text arrives in many small deltas; render it at most once a frame
-      let pending = "";
-      let frame = 0;
-      const flush = () => {
-        frame = 0;
-        if (!pending) return;
-        const chunk = pending;
-        pending = "";
-        patch((t) => ({ ...t, answer: t.answer + chunk, phase: t.phase === "error" ? t.phase : "write" }));
-      };
-
-      try {
-        await ask(
-          {
-            id: chatId,
-            query: question,
-            ...(model ? { model, models: { answer: model } } : {}),
-            message_history: history,
-            files: fileIds,
-          },
-          (e) => {
-            if (e.type === "a") {
-              pending += e.c;
-              if (!frame) frame = requestAnimationFrame(flush);
-            } else if (e.type === "b") {
-              patch((t) => ({
-                ...t,
-                blocks: [...t.blocks, e.block],
-                phase: e.block.type === "references" && t.phase === "search" ? "read" : t.phase,
-              }));
-            } else if (e.type === "c") {
-              patch((t) => ({ ...t, error: e.message, phase: "error" }));
-            } else if (e.type === "id") {
-              reload();
-            }
-          },
-          ctrl.signal,
-        );
-      } catch (err: any) {
-        if (err?.name !== "AbortError") patch((t) => ({ ...t, error: String(err?.message || err), phase: "error" }));
-      } finally {
-        cancelAnimationFrame(frame);
-        flush();
-        const stopped = ctrl.signal.aborted;
-        patch((t) => ({
-          ...t,
-          phase: t.phase === "error" ? "error" : stopped ? "stopped" : "done",
-          elapsedMs: performance.now() - started,
-        }));
-        abort.current = null;
-        setBusy(false);
-        setLive(chatId, { question: first, answering: false });
-        settle();
-      }
     },
     [chatId, model, reload, settle, setLive],
   );
@@ -264,11 +200,32 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
         if (cancelled) return;
         setChat(r.chat);
         att.setFiles(r.chat.files ?? []);
-        setTurns(fromMessages(r.messages));
+        const serverTurns = fromMessages(r.messages);
+        const run = getRun(chatId);
+        // The database has no messages until the answer finishes. A run still
+        // in flight (or just finished ahead of that save) is the thread.
+        if (run?.busy) {
+          const before = run.turns.length;
+          adoptHistory(chatId, serverTurns);
+          setTurns(() => getRun(chatId)?.turns ?? serverTurns);
+          setBusy(() => !!getRun(chatId)?.busy);
+          const next = getRun(chatId);
+          if (next?.busy && next.turns.length > before) setActive(next.turns.length - 1);
+        } else if (run && run.turns.length > serverTurns.length) {
+          setTurns(run.turns);
+          setBusy(false);
+        } else {
+          setTurns(serverTurns);
+          setBusy(false);
+        }
         setStatus("ready");
       })
       .catch((e) => {
         if (cancelled) return;
+        if (getRun(chatId)?.turns.length) {
+          setStatus("ready");
+          return;
+        }
         if (e instanceof ApiError && e.status === 404) {
           setStatus(seed ? "ready" : "missing");
         } else {
@@ -282,12 +239,28 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
 
-  useEffect(() => () => abort.current?.abort(), []);
+  // The stream lives in the run store, so leaving this thread does not cancel it.
+  useEffect(
+    () =>
+      subscribeRun(chatId, (run) => {
+        setTurns(run.turns);
+        setBusy(run.busy);
+        if (run.turns.length) setStatus("ready");
+      }),
+    [chatId],
+  );
 
   // A question carried in the URL (from home or discover) is asked once the thread is ready.
   // Deferred a tick so a StrictMode remount cancels the timer, not the stream.
   useEffect(() => {
     if (status !== "ready" || !seed || seeded.current) return;
+    const run = getRun(chatId);
+    if (run?.busy || run?.turns.some((t) => t.question === seed)) {
+      seeded.current = true;
+      clearHandoff(chatId);
+      router.replace(`/?chat=${chatId}`, { scroll: false });
+      return;
+    }
     const timer = window.setTimeout(() => {
       seeded.current = true;
       clearHandoff(chatId);
@@ -393,7 +366,7 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
   }, []);
 
   const followUp = useCallback((q: string) => send(q, selectedRef.current), [send]);
-  const stop = useCallback(() => abort.current?.abort(), []);
+  const stop = useCallback(() => stopRun(chatId), [chatId]);
   const retry = useCallback(
     (index: number) => {
       const t = turnsRef.current[index];

@@ -15,6 +15,8 @@ export type Prefs = {
   rail: boolean;
   /** answer model; empty follows the instance default */
   model: string;
+  /** how many search rounds a question gets */
+  depth: "fast" | "balance" | "deep";
 };
 
 export const PREF_DEFAULTS: Prefs = {
@@ -24,6 +26,7 @@ export const PREF_DEFAULTS: Prefs = {
   face: "serif",
   rail: true,
   model: "",
+  depth: "balance",
 };
 
 const KEY: Record<keyof Prefs, string> = {
@@ -33,6 +36,7 @@ const KEY: Record<keyof Prefs, string> = {
   face: "libra:face",
   rail: "libra:rail",
   model: "libra:model",
+  depth: "libra:depth",
 };
 
 const listeners = new Set<() => void>();
@@ -54,6 +58,8 @@ function parse<K extends keyof Prefs>(key: K, raw: string | null): Prefs[K] {
     }
     case "rail":
       return (raw !== "0") as Prefs[K];
+    case "depth":
+      return (raw === "fast" || raw === "deep" ? raw : "balance") as Prefs[K];
     default:
       return raw as Prefs[K];
   }

@@ -21,6 +21,8 @@ pub enum BlockType {
     Document,
     Message,
     Answered,
+    /// One round of "decide what to search, then search it".
+    Research,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +69,20 @@ impl Block {
             block_type: BlockType::Videos,
             message: "videos".into(),
             data: Some(json!({ "results": results })),
+            extra: None,
+        }
+    }
+
+    pub fn research(depth: &str, round: usize, rounds: usize, queries: &[String], note: &str) -> Self {
+        Self {
+            block_type: BlockType::Research,
+            message: note.to_string(),
+            data: Some(json!({
+                "depth": depth,
+                "round": round,
+                "rounds": rounds,
+                "queries": queries,
+            })),
             extra: None,
         }
     }

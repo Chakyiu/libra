@@ -69,6 +69,32 @@ export function mediaOf(blocks: Block[], type: "images" | "videos"): SearchResul
 
 export const widgetsOf = (blocks: Block[]) => blocks.filter((b) => WIDGETS.has(b.type));
 
+export type Research = {
+  depth: string;
+  round: number;
+  rounds: number;
+  queries: string[];
+};
+
+/** Queries the engine decided to run, in the order the rounds produced them. */
+export function researchOf(blocks: Block[]): Research {
+  const queries: string[] = [];
+  let depth = "";
+  let round = 0;
+  let rounds = 0;
+  for (const b of blocks) {
+    if (b.type !== "research") continue;
+    if (typeof b.data?.depth === "string") depth = b.data.depth;
+    round = Number(b.data?.round) || round;
+    rounds = Number(b.data?.rounds) || rounds;
+    const list = Array.isArray(b.data?.queries) ? b.data.queries : [];
+    for (const q of list) {
+      if (typeof q === "string" && q && !queries.includes(q)) queries.push(q);
+    }
+  }
+  return { depth, round, rounds, queries };
+}
+
 export type Stats = {
   elapsedMs?: number;
   model?: string;

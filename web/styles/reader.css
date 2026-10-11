@@ -91,6 +91,27 @@
   border: 1px solid var(--muted);
   flex: none;
 }
+.research {
+  margin: -8px 0 22px;
+}
+.research .kicker { margin-bottom: 8px; }
+.research ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+.research li {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 3px 8px;
+}
+
 .stage[data-state='active'] .stage__led {
   background: var(--accent);
   border-color: var(--accent);
