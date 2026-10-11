@@ -119,4 +119,7 @@ enough to exercise the whole pipeline end to end.
 - Currency conversion in the calculator, and the upstream "discussion mode" long-form writer.
 - Auth: the service is assumed to sit behind a reverse proxy. CORS is wide open for dev.
 - Embedding search is brute-force cosine over SQLite BLOBs — fine up to a few thousand chunks.
-# libra
+
+## License
+
+[MIT](LICENSE).
