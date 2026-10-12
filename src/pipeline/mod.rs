@@ -531,7 +531,7 @@ impl Pipeline {
             .unwrap_or_else(|_| light_llm.clone());
 
         // 1. classify the query
-        let cls = match cut(&turn.cancel, &tx, self.classify(&light_llm, &req)).await {
+        let mut cls = match cut(&turn.cancel, &tx, self.classify(&light_llm, &req)).await {
             Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
             Ok(Ok(c)) => c,
             Ok(Err(e)) => {
@@ -545,31 +545,37 @@ impl Pipeline {
                 }
             }
         };
-        let classification = Block {
-            block_type: BlockType::Answered,
-            message: format!(
-                "type={} web_search={} images={} videos={}",
-                cls.r#type, cls.need_web_search, cls.needs_image_results, cls.needs_video_results
-            ),
-            data: Some(json!({
-                "type": cls.r#type,
-                "need_web_search": cls.need_web_search,
-                "needs_image_results": cls.needs_image_results,
-                "needs_video_results": cls.needs_video_results,
-                "content_generation": cls.content_generation,
-            })),
-            extra: None,
-        };
-        blocks.push(classification.clone());
-        Self::emit_block(&tx, classification);
-        self.checkpoint(&turn, &answer, &blocks, "search", "").await;
-        if self.halt(&turn, &answer, &blocks, &tx).await {
-            return;
+        // A follow-up such as "翻譯做中文" acts on the previous answer. Resolve that
+        // before widgets and search so the previous text is what gets translated.
+        let mut search_query = req.query.clone();
+        let mut from_history = false;
+        if !req.message_history.is_empty() {
+            if transform_only(&req.query) {
+                from_history = true;
+            } else {
+                match cut(&turn.cancel, &tx, self.rewrite_followup(&light_llm, &req)).await {
+                    Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
+                    Ok(Some(plan)) => {
+                        if !plan.question.is_empty() {
+                            search_query = plan.question;
+                        }
+                        from_history = !plan.search;
+                    }
+                    Ok(None) => {}
+                }
+            }
+        }
+        if from_history {
+            cls.need_web_search = false;
+            cls.needs_image_results = false;
+            cls.needs_video_results = false;
         }
 
         // 2. widgets, then the browser location when the question depends on where the user is.
         // Attached files are about the file, so they do not prompt for a place.
         // "what's the weather" needs a place even when the widget model forgets to ask.
+        // The clock is resolved before classification is sent, so a pure time question
+        // can turn search off with the flag the UI reads.
         let mut here = if req.files.is_empty() && crate::widgets::query_needs_place(&req.query) {
             match cut(&turn.cancel, &tx, self.locate(&turn.chat_id, &tx, true)).await {
                 Ok(place) => place,
@@ -581,7 +587,7 @@ impl Pipeline {
         if self.halt(&turn, &answer, &blocks, &tx).await {
             return;
         }
-        let choice = if req.files.is_empty() {
+        let mut choice = if req.files.is_empty() && !from_history {
             match cut(&turn.cancel, &tx, self.choose_widgets(&light_llm, &req)).await {
                 Ok(c) => c,
                 Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
@@ -589,6 +595,13 @@ impl Pipeline {
         } else {
             WidgetChoice::default()
         };
+        if req.files.is_empty() && !from_history {
+            // "time in Tokyo" is that city, not a request for the browser's location.
+            if crate::widgets::clock_place(&req.query).is_some_and(|place| !place.is_empty()) {
+                choice.needs_location = false;
+            }
+            crate::widgets::bind_clock(&mut choice.requested, &req.query);
+        }
         let precise = crate::widgets::location_request(
             &choice.requested,
             choice.needs_location,
@@ -622,6 +635,33 @@ impl Pipeline {
             Ok(found) => found,
             Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
         };
+        let clocked = crate::widgets::clock_facts(&widget_blocks);
+        if !clocked.is_empty() && crate::widgets::pure_clock(&req.query, &choice.requested) {
+            cls.need_web_search = false;
+            cls.needs_image_results = false;
+            cls.needs_video_results = false;
+        }
+        let classification = Block {
+            block_type: BlockType::Answered,
+            message: format!(
+                "type={} web_search={} images={} videos={}",
+                cls.r#type, cls.need_web_search, cls.needs_image_results, cls.needs_video_results
+            ),
+            data: Some(json!({
+                "type": cls.r#type,
+                "need_web_search": cls.need_web_search,
+                "needs_image_results": cls.needs_image_results,
+                "needs_video_results": cls.needs_video_results,
+                "content_generation": cls.content_generation,
+            })),
+            extra: None,
+        };
+        blocks.push(classification.clone());
+        Self::emit_block(&tx, classification);
+        self.checkpoint(&turn, &answer, &blocks, "search", "").await;
+        if self.halt(&turn, &answer, &blocks, &tx).await {
+            return;
+        }
         for b in widget_blocks.iter() {
             blocks.push(b.clone());
             Self::emit_block(&tx, b.clone());
@@ -633,16 +673,6 @@ impl Pipeline {
             return;
         }
 
-        // 3. resolve the search query (follow-up rewriting)
-        let mut search_query = if cls.r#type == "followup" && !req.message_history.is_empty() {
-            match cut(&turn.cancel, &tx, self.rewrite_followup(&light_llm, &req)).await {
-                Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
-                Ok(Some(q)) if !q.is_empty() => q,
-                Ok(_) => req.query.clone(),
-            }
-        } else {
-            req.query.clone()
-        };
         if self.halt(&turn, &answer, &blocks, &tx).await {
             return;
         }
@@ -853,10 +883,18 @@ impl Pipeline {
         }
         candidates.truncate(cfg.rerank_limit);
 
-        let references = build_references(&candidates);
-        let ref_block = Block::references(candidates.clone());
-        blocks.push(ref_block.clone());
-        Self::emit_block(&tx, ref_block);
+        let references = if from_history {
+            "No new web search. Use the previous answer below as the text to work from.".into()
+        } else if candidates.is_empty() && !clocked.is_empty() {
+            "No web search. The Clock line is the current time. State that time.".into()
+        } else {
+            build_references(&candidates)
+        };
+        if !from_history {
+            let ref_block = Block::references(candidates.clone());
+            blocks.push(ref_block.clone());
+            Self::emit_block(&tx, ref_block);
+        }
         self.checkpoint(&turn, &answer, &blocks, "read", "").await;
         if self.halt(&turn, &answer, &blocks, &tx).await {
             return;
@@ -929,9 +967,14 @@ impl Pipeline {
         } else {
             prompts::fill(
                 prompts::ANSWER_USER,
-                &[("references", &references), ("query", &req.query)],
+                &[
+                    ("references", &references),
+                    ("query", &req.query),
+                    ("prior", &prior_block(&req.message_history)),
+                ],
             )
         };
+        let user_prompt = with_clock(user_prompt, &clocked);
 
         let mut messages: Vec<Msg> = Vec::new();
         for m in req.message_history.iter().rev().take(10).rev() {
@@ -1242,8 +1285,10 @@ impl Pipeline {
         }
 
         // Keep a mix of every round. A plain truncate would keep only the first query's hits.
+        // Leave room above the citation cap so filtering can drop weak hits and still fill it.
         let mut results = merge_buckets(&buckets);
-        results.truncate(24);
+        let pool = (cfg.rerank_limit + cfg.rerank_limit / 2).max(24);
+        results.truncate(pool);
         (results, asked)
     }
 
@@ -1278,7 +1323,7 @@ impl Pipeline {
         lookup_query_from(&raw)
     }
 
-    async fn rewrite_followup(&self, llm: &Llm, req: &AskRequest) -> Option<String> {
+    async fn rewrite_followup(&self, llm: &Llm, req: &AskRequest) -> Option<FollowupPlan> {
         let history = history_text(&req.message_history);
         let user = prompts::fill(
             prompts::DETERMINE_FOLLOWUP_USER,
@@ -1292,10 +1337,17 @@ impl Pipeline {
             .json_call(prompts::DETERMINE_FOLLOWUP_SYSTEM, &user, None)
             .await
             .ok()?;
-        v["question"]
+        if !v["needs_follow_up"].as_bool().unwrap_or(true) {
+            return None;
+        }
+        let question = v["question"]
             .as_str()
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+            .unwrap_or_default();
+        Some(FollowupPlan {
+            question,
+            search: v["search"].as_bool().unwrap_or(true),
+        })
     }
 
     async fn choose_widgets(&self, llm: &Llm, req: &AskRequest) -> WidgetChoice {
@@ -1551,6 +1603,15 @@ fn valid_tz(name: &str) -> String {
         name.to_string()
     } else {
         String::new()
+    }
+}
+
+/// The converted clock sits above the question so the model states that time.
+fn with_clock(body: String, facts: &str) -> String {
+    if facts.is_empty() {
+        body
+    } else {
+        format!("{facts}\n\n{body}")
     }
 }
 
@@ -1873,6 +1934,12 @@ fn findings_brief(results: &[SearchResult]) -> String {
         .join("\n\n")
 }
 
+struct FollowupPlan {
+    question: String,
+    /// False when the user wants the previous answer rewritten rather than new facts.
+    search: bool,
+}
+
 fn history_text(history: &[Msg]) -> String {
     if history.is_empty() {
         return "(none)".into();
@@ -1885,6 +1952,120 @@ fn history_text(history: &[Msg]) -> String {
         .map(|m| format!("{}: {}", m.role, m.content))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The last assistant reply, placed in the answer prompt so a follow-up can
+/// translate or rewrite it without the user pasting it again.
+fn prior_block(history: &[Msg]) -> String {
+    let Some(text) = history
+        .iter()
+        .rev()
+        .find(|m| m.role == "assistant" && !m.content.trim().is_empty())
+    else {
+        return String::new();
+    };
+    let mut body: String = text.content.chars().take(12_000).collect();
+    if text.content.chars().count() > body.chars().count() {
+        body.push('…');
+    }
+    format!(
+        "\nPrevious answer in this conversation:\n{body}\n\nThe user can see that answer. If they asked to translate, summarize, shorten, rewrite, or explain it, produce that result from the text above. Keep its citation numbers when you translate. If they asked a new question, answer the new question and use the previous answer as context.\n"
+    )
+}
+
+/// A short request whose only job is to transform the previous answer.
+/// "翻譯做中文" and "translate this into chinese" match. A request that names
+/// a new subject, such as "translate the EU AI Act", does not.
+fn transform_only(query: &str) -> bool {
+    let q = query
+        .trim()
+        .trim_end_matches(['?', '!', '.', '。', '？', '！'])
+        .to_lowercase();
+    let n = q.chars().count();
+    if !(2..=48).contains(&n) {
+        return false;
+    }
+    const CUES: &[&str] = &[
+        "translate",
+        "translation",
+        "summarize",
+        "summarise",
+        "summary",
+        "shorten",
+        "rewrite",
+        "rephrase",
+        "paraphrase",
+        "翻譯",
+        "翻译",
+        "總結",
+        "总结",
+        "縮短",
+        "缩短",
+        "改寫",
+        "改写",
+        "重寫",
+        "重写",
+        "翻成",
+        "譯成",
+        "译成",
+        "中譯",
+        "中译",
+    ];
+    const SOFT: &[&str] = &[
+        "make it shorter",
+        "make this shorter",
+        "shorter version",
+        "in chinese",
+        "into chinese",
+        "to chinese",
+        "in english",
+        "into english",
+        "to english",
+        "用中文",
+        "成中文",
+        "做中文",
+        "用英文",
+        "成英文",
+        "更短",
+        "簡短一點",
+        "简短一点",
+        "解釋一下",
+        "解释一下",
+        "explain that",
+        "explain this",
+        "explain it",
+    ];
+    let has_cue = CUES.iter().any(|c| q.contains(c));
+    if !has_cue && !SOFT.iter().any(|c| q.contains(c)) {
+        return false;
+    }
+    let mut rest = q;
+    let mut phrases: Vec<&str> = CUES
+        .iter()
+        .copied()
+        .chain(SOFT.iter().copied())
+        .chain(
+            [
+                "中文", "英文", "一下", "這個", "这个", "這段", "这段", "上面", "上文", "它", "請",
+                "请", "幫我", "帮我", "把", "這", "这",
+            ]
+            .into_iter(),
+        )
+        .collect();
+    phrases.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    phrases.dedup();
+    for phrase in phrases {
+        rest = rest.replace(phrase, " ");
+    }
+    const TOKENS: &[&str] = &[
+        "this", "that", "it", "the", "a", "an", "to", "into", "in", "of", "above", "please", "me",
+        "you", "can", "could", "for", "my",
+    ];
+    let leftover: String = rest
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '，' || c == '、')
+        .filter(|word| !word.is_empty() && !TOKENS.contains(word))
+        .collect();
+    leftover.chars().count() <= 2
 }
 
 /// Merge web + news results, dropping duplicate URLs and tracking the reference index.
@@ -1977,6 +2158,40 @@ mod tests {
             url: url.into(),
             ..SearchResult::default()
         }
+    }
+
+    #[test]
+    fn a_translation_follow_up_uses_the_previous_answer() {
+        assert!(transform_only("翻譯做中文"));
+        assert!(transform_only("翻译成中文"));
+        assert!(transform_only("translate this into chinese"));
+        assert!(transform_only("summarize that"));
+        assert!(transform_only("用中文"));
+        assert!(!transform_only("Apple Huxe reverse acqui-hire"));
+        assert!(!transform_only("translate the EU AI Act"));
+        assert!(!transform_only("中文新聞"));
+        let history = vec![
+            msg("user", "what did Apple do with Huxe?"),
+            msg(
+                "assistant",
+                "Apple hired staff from Huxe and licensed its technology.",
+            ),
+        ];
+        let block = prior_block(&history);
+        assert!(block.contains("Apple hired staff from Huxe"));
+        assert!(block.contains("produce that result"));
+        assert!(prior_block(&[]).is_empty());
+        let prompt = prompts::fill(
+            prompts::ANSWER_USER,
+            &[
+                ("references", "No new web search."),
+                ("query", "翻譯做中文"),
+                ("prior", &block),
+            ],
+        );
+        assert!(prompt.contains("翻譯做中文"));
+        assert!(prompt.contains("Apple hired staff from Huxe"));
+        assert!(!prompt.contains("{prior}"));
     }
 
     #[test]
@@ -2085,6 +2300,12 @@ mod tests {
         assert!(image.contains(prompts::IMAGE_READ_SYSTEM));
         let already = with_today("Today is Monday. Rules.".into());
         assert_eq!(already, "Today is Monday. Rules.");
+        let clocked = with_clock(
+            "Answer the question.".into(),
+            "Clock:\nTokyo is 11:57 UTC+09:00.",
+        );
+        assert!(clocked.starts_with("Clock:\nTokyo is 11:57"), "{clocked}");
+        assert!(clocked.contains("Answer the question."));
         let plan = prompts::fill(
             prompts::PLAN_SEARCH_SYSTEM,
             &[

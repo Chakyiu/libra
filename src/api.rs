@@ -36,6 +36,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/suggestions", get(suggestions))
         .route("/discover", get(discover))
         .route("/generate/image", post(generate_image))
+        .route("/stocks/{symbol}", get(stock_chart))
         .with_state(app.clone());
 
     // The Next.js build is a static export; serve it straight from the binary.
@@ -211,6 +212,35 @@ fn stream_events(rx: UnboundedReceiver<Event>) -> Response {
     Sse::new(stream)
         .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(10)))
         .into_response()
+}
+
+// ------------------------------------------------------------------- stocks
+
+#[derive(Deserialize)]
+struct StockQuery {
+    #[serde(default)]
+    range: String,
+}
+
+async fn stock_chart(
+    State(app): State<Arc<App>>,
+    Path(symbol): Path<String>,
+    Query(q): Query<StockQuery>,
+) -> LibraResult<Json<Value>> {
+    let range = if q.range.is_empty() {
+        "1d"
+    } else {
+        q.range.as_str()
+    };
+    match crate::widgets::stocks::chart(&app.http, &symbol, range).await {
+        Ok(body) => Ok(Json(body)),
+        Err(crate::widgets::stocks::ChartError::Rejected) => {
+            Err(LibraError::BadRequest("unknown symbol or range".into()))
+        }
+        Err(crate::widgets::stocks::ChartError::Unavailable) => {
+            Err(LibraError::NotFound(format!("no chart for {symbol}")))
+        }
+    }
 }
 
 // ------------------------------------------------------------------ upload

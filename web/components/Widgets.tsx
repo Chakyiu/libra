@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Block, SearchResult } from "@/lib/api";
+import { StockQuote } from "@/components/StockQuote";
 
 /** WMO weather codes as Open-Meteo reports them. */
 const WMO: Record<number, string> = {
@@ -64,40 +65,6 @@ function Weather({ data }: { data: any }) {
   );
 }
 
-function Stocks({ data }: { data: any }) {
-  const close = num(data.close);
-  const open = num(data.open);
-  const change = close != null && open != null ? close - open : null;
-  const pct = change != null && open ? (change / open) * 100 : null;
-  const volume = num(data.volume);
-
-  return (
-    <aside className="datum">
-      <p className="kicker">
-        {String(data.symbol ?? "").toUpperCase()}
-        {data.date ? ` · ${data.date}` : ""}
-        {data.time ? ` ${data.time}` : ""}
-      </p>
-      <p className="datum__value">
-        {close ?? "—"}
-        {change != null && (
-          <small className={change >= 0 ? "is-up" : "is-down"}>
-            {change >= 0 ? "+" : "−"}
-            {Math.abs(change).toFixed(2)}
-            {pct != null ? ` (${Math.abs(pct).toFixed(2)}%)` : ""} since open
-          </small>
-        )}
-      </p>
-      <div className="datum__row">
-        {open != null && <span className="meta">Open {open}</span>}
-        {num(data.high) != null && <span className="meta">High {data.high}</span>}
-        {num(data.low) != null && <span className="meta">Low {data.low}</span>}
-        {volume != null && <span className="meta">Volume {volume.toLocaleString()}</span>}
-      </div>
-    </aside>
-  );
-}
-
 function Calculation({ data }: { data: any }) {
   return (
     <aside className="datum">
@@ -109,20 +76,32 @@ function Calculation({ data }: { data: any }) {
 }
 
 function Time({ data }: { data: any }) {
-  // "2026-10-11 14:02:33 +08:00"
+  // "2026-10-12 11:57:03 +09:00"
   const [date, clock, offset] = String(data.time ?? "").split(" ");
+  const where = timePlace(data);
+  const abbr = String(data.abbr || "").trim();
   return (
     <aside className="datum">
-      <p className="kicker">Local time{data.timezone && data.timezone !== "local" ? ` · ${data.timezone}` : ""}</p>
+      <p className="kicker">{where ? `Time in ${where}` : "Local time"}</p>
       <p className="datum__value">{clock ? clock.slice(0, 5) : data.time}</p>
       {date && (
         <p className="meta" style={{ margin: 0 }}>
           {date}
+          {abbr ? ` · ${abbr}` : ""}
           {offset ? ` · UTC${offset}` : ""}
         </p>
       )}
     </aside>
   );
+}
+
+function timePlace(data: any) {
+  const place = String(data.place || "").trim();
+  if (place && place !== "local") return place;
+  const tz = String(data.timezone || "").trim();
+  if (!tz || tz === "local") return "";
+  const city = tz.includes("/") ? tz.split("/").pop() || tz : tz;
+  return city.replaceAll("_", " ");
 }
 
 export function Widget({ block }: { block: Block }) {
@@ -131,7 +110,7 @@ export function Widget({ block }: { block: Block }) {
     case "weather":
       return <Weather data={d} />;
     case "stocks":
-      return <Stocks data={d} />;
+      return <StockQuote data={d} />;
     case "calculation":
       return <Calculation data={d} />;
     case "time":

@@ -56,9 +56,9 @@ fn validate(cfg: &Config, db_path: &Path) -> Result<(), LibraError> {
             "numWebResults must be between 1 and 50".into(),
         ));
     }
-    if cfg.rerank_limit == 0 || cfg.rerank_limit > 20 {
+    if cfg.rerank_limit == 0 || cfg.rerank_limit > 50 {
         return Err(LibraError::BadRequest(
-            "rerankLimit must be between 1 and 20".into(),
+            "rerankLimit must be between 1 and 50".into(),
         ));
     }
     if !(0.0..=2.0).contains(&cfg.default_temperature) {

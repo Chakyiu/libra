@@ -66,7 +66,7 @@ src/
   search/            provider trait + 7 providers + fallback router with Redis cache
   pipeline/          ask(): classify → widgets → plan searches → search rounds → rerank → answer → suggestions
   uploads/           text/pdf/docx extraction, chunking, embedding, cosine retrieval
-  widgets/           calculator, time, weather (Open-Meteo), stocks (stooq)
+  widgets/           calculator, time, weather (Open-Meteo), stocks (Nasdaq)
   prompts/           every LLM prompt, all returning strict JSON
 web/                 Next.js app router + plain CSS from the design/ mockups (static export)
 docker/              searxng settings

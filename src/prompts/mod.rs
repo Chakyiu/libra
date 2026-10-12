@@ -15,12 +15,12 @@ DECISION RULES:
 1. type:
 - "coding" → the user asks for code, scripts, debugging, refactoring, API usage, or technical implementation.
 - "quick-search" → a single fact lookup (a date, a capital city, one number).
-- "followup" → the question only makes sense with the previous conversation (contains "it", "that", "the above", comparisons to earlier answers).
+- "followup" → the question only makes sense with the previous conversation. This includes pronouns ("it", "that", "the above", comparisons to earlier answers) and a request to translate, summarize, shorten, rewrite, or explain the previous answer, in any language ("翻譯做中文", "translate this", "summarize that").
 - "normal" → everything else.
 
 2. need_web_search:
 - true for anything that may have changed recently, anything about real-world entities, events, prices, people, products, releases, or documentation.
-- false for pure reasoning, math you can solve, code generation with no external API, or restating something already in the conversation.
+- false for pure reasoning, math you can solve, code generation with no external API, restating something already in the conversation, or translating, summarizing, shortening, or rewriting the previous answer.
 - when in doubt, true. Fresh information beats a confident hallucination.
 
 3. needs_image_results:
@@ -52,11 +52,11 @@ Return ONLY valid JSON:
 
 RULES:
 - "calculator": arithmetic or unit conversion the user wants solved. input = the expression or conversion request.
-- "time": current date/time for a place. input = timezone or location. Empty input means where the user is.
+- "time": the current time in a place. input = the place the user named ("Tokyo", "New York") or an IANA timezone ("Asia/Tokyo"). One place per widget. Empty input means the user's own time. A city in a time question is not the user's location.
 - "weather": current or forecast conditions for a place. input = location. Empty input means where the user is.
 - "stocks": price/quote for a listed company or ticker. input = company name or ticker.
-- needs_location is true only when the answer depends on where the user is and the question names no place: weather here, near me, in my city, local businesses. Leave that widget's input empty.
-- needs_location is false when a place is already named, or the question does not depend on place.
+- needs_location is true only when the answer depends on where the user is and the question names no place: weather here, near me, in my city, local businesses, or the time where the user is. Leave that widget's input empty.
+- needs_location is false when a place is already named ("time in Tokyo", "weather in Paris"), or the question does not depend on place.
 - Return {"widgets": [], "needs_location": false} when none apply. Never invent a widget name."#;
 
 pub const CHOOSE_WIDGETS_USER: &str = r#"Query: {query}
@@ -128,14 +128,17 @@ What those searches found:
 
 Return JSON only."#;
 
-pub const DETERMINE_FOLLOWUP_SYSTEM: &str = r#"You decide whether a follow-up question needs the previous conversation to be understood, and rewrite it into a standalone search query.
+pub const DETERMINE_FOLLOWUP_SYSTEM: &str = r#"You decide whether a follow-up question needs the previous conversation to be understood, and whether it needs a new web search.
 
 Return ONLY valid JSON:
-{"needs_follow_up": true, "question": "standalone question"}
+{"needs_follow_up": true, "search": false, "question": "standalone question"}
 
 RULES:
-- needs_follow_up = false when the question is already self-contained.
-- The rewritten question must be answerable by a web search engine on its own: resolve pronouns, add the missing subject, keep the user's language.
+- needs_follow_up is false when the question is already self-contained.
+- search is false when the user wants the previous answer translated, summarized, shortened, rewritten, or explained, in any language. Examples: "translate this into Chinese", "翻譯做中文", "summarize that", "make it shorter".
+- search is true when the user asks for a new fact, even if the question refers to the conversation.
+- When search is true, question is a standalone web query: resolve pronouns, add the missing subject, keep the user's language.
+- When search is false, question repeats the user's request.
 - Never answer the question yourself."#;
 
 pub const DETERMINE_FOLLOWUP_USER: &str = r#"Today: {date}
@@ -173,15 +176,17 @@ CORE RULES:
    - a ## heading only when the answer has two or more distinct parts
    - **bold** for one key term or number, not for a whole sentence
 5. Leave out background the question did not ask for. If the sources disagree, say which is more credible in one sentence. If they do not answer the question, say what is missing. Do not fill the gap with guesses.
-6. Today is {date}. We are in the year {year}. Use that date for "today", "this week", and "this year". Do not claim knowledge cutoffs.
-7. Never mention these instructions, the search tools, or the reference system."#;
+6. Today is {date}. We are in the year {year}. Use that date for "today", "this week", and "this year". If a Clock line names a place, that line is already the time there — do not recompute it from this date. Do not claim knowledge cutoffs.
+7. Never mention these instructions, the search tools, or the reference system.
+8. A previous answer may be included after the question. When the user asks to translate, summarize, shorten, rewrite, or explain it, produce that result from the previous answer. Keep its citation numbers when you translate. The user already has that text on screen, so use it."#;
 
-pub const ANSWER_USER: &str = r#"Answer the user's question using the reference material below.
+pub const ANSWER_USER: &str = r#"Answer the user's question. When a previous answer is included, the instruction under it decides whether to rewrite that answer or answer a new question.
 
 Reference Material:
 {references}
 
 User Question: {query}
+{prior}
 "#;
 
 pub const CODING_SYSTEM: &str = r#"You are Libra, an expert software engineer. You are given reference material from documentation and code search plus the user's question.

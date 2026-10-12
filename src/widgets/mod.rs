@@ -1,15 +1,16 @@
 //! Answer widgets: calculator, time, weather, stocks. Ported from upstream `widgets/`.
 
 mod calculator;
+mod clock;
 pub mod stocks;
 pub mod weather;
 
 use crate::blocks::{Block, BlockType};
 use crate::config::SettingsHandle;
 use calculator::eval;
-use chrono::Local;
-use chrono_tz::Tz;
 use reqwest::Client;
+
+pub use clock::{bind_clock, clock_facts, clock_place, pure_clock};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -158,7 +159,7 @@ impl Registry {
             let input = w.input.trim().to_string();
             let block = match name.as_str() {
                 "calculator" => Self::calculator(&input, query),
-                "time" => Self::time(&input, here),
+                "time" => clock::render(&self.http, &input, here).await,
                 "weather" => {
                     let coords = here.and_then(Here::coords);
                     if wants_here(&input) {
@@ -189,44 +190,6 @@ impl Registry {
             block_type: BlockType::Widget,
             message: format!("{expr} = {value}"),
             data: Some(json!({ "name": "calculator", "expression": expr, "result": value })),
-            extra: None,
-        })
-    }
-
-    fn time(input: &str, here: Option<&Here>) -> Option<Block> {
-        let now = Local::now();
-        let (label, local) = if !wants_here(input) {
-            match input.parse::<Tz>() {
-                Ok(tz) => (
-                    input.to_string(),
-                    now.with_timezone(&tz)
-                        .format("%Y-%m-%d %H:%M:%S %:z")
-                        .to_string(),
-                ),
-                Err(_) => return None,
-            }
-        } else if let Some((name, tz)) = here.and_then(|h| {
-            h.timezone
-                .parse::<Tz>()
-                .ok()
-                .map(|tz| (h.timezone.clone(), tz))
-        }) {
-            (
-                name,
-                now.with_timezone(&tz)
-                    .format("%Y-%m-%d %H:%M:%S %:z")
-                    .to_string(),
-            )
-        } else {
-            (
-                "local".to_string(),
-                now.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
-            )
-        };
-        Some(Block {
-            block_type: BlockType::Widget,
-            message: local.clone(),
-            data: Some(json!({ "name": "time", "timezone": label, "time": local })),
             extra: None,
         })
     }

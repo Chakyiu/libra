@@ -47,7 +47,7 @@ const WIDGETS = [
   { id: "calculator", label: "Calculator", help: "Works out arithmetic in the question and shows it above the answer." },
   { id: "time", label: "Time", help: "The current time in a city or timezone." },
   { id: "weather", label: "Weather", help: "Current conditions and a five-day forecast from Open-Meteo. No key needed." },
-  { id: "stocks", label: "Stocks", help: "The latest quote for a ticker from Stooq. No key needed." },
+  { id: "stocks", label: "Stocks", help: "Quote, session chart, and key stats for a US-listed company or ticker. No key needed." },
 ];
 
 const PROVIDER_TYPES: Record<string, string> = {
@@ -424,7 +424,7 @@ function AnsweringPanel({ s, set, onAddProvider }: { s: Settings; set: SetField;
         <Switch checked={!!s.enableReranker} onChange={(v) => set("enableReranker", v)} label="Rerank results" />
       </Row>
       <Row label="Sources per answer" help={`How many results the answer model reads and can cite. ${s.rerankLimit} currently.`}>
-        <input type="range" min={1} max={20} value={s.rerankLimit ?? 7} onChange={(e) => set("rerankLimit", Number(e.target.value))} aria-label="Sources per answer" />
+        <input type="range" min={1} max={50} value={s.rerankLimit ?? 7} onChange={(e) => set("rerankLimit", Number(e.target.value))} aria-label="Sources per answer" />
       </Row>
 
       <p className="kicker panel__sub">Widgets</p>
