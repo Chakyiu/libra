@@ -156,12 +156,13 @@ Return ONLY valid JSON:
 {"title": "a concise title", "emoji": "an emoji"}
 
 RULES:
-- Title: 3-6 words, specific, no quotes, no trailing punctuation.
+- Title: a short specific phrase, no quotes, no trailing punctuation. About 3-6 words in English, or the same brevity in the query's own language.
+- Write the title in the same language as the query. A Chinese query gets a Chinese title. Never translate the title into English.
 - Emoji: a single emoji that represents the topic."#;
 
 pub const QUERY_TITLE_USER: &str = r#"Query: {query}
 
-Return JSON only."#;
+Return JSON only. The title must use the same language as the query."#;
 
 pub const ANSWER_SYSTEM: &str = r#"You are Libra, a fast research assistant. You answer with facts you have verified through search, and you cite every source.
 

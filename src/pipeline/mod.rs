@@ -2141,10 +2141,44 @@ pub async fn title_and_emoji(
         )
         .await
         .unwrap_or_else(|_| json!({ "title": query }));
-    let title = v["title"].as_str().unwrap_or(query).to_string();
+    let generated = v["title"].as_str().unwrap_or(query);
+    let title = title_in_query_language(query, generated);
     let emoji = v["emoji"].as_str().unwrap_or("🔍").to_string();
     db.rename_chat(chat_id, &title, &emoji).await?;
     Ok(())
+}
+
+/// A Chinese question should not be filed under an English title. When the
+/// model translates anyway, the question itself is the title.
+fn title_in_query_language(query: &str, title: &str) -> String {
+    let title = title
+        .trim()
+        .trim_matches(|c| c == '"' || c == '“' || c == '”');
+    if title.is_empty() || (uses_cjk(query) && !uses_cjk(title)) {
+        return clip_title(query);
+    }
+    title.to_string()
+}
+
+fn uses_cjk(s: &str) -> bool {
+    s.chars().any(|c| {
+        ('\u{3400}'..='\u{9FFF}').contains(&c)
+            || ('\u{3040}'..='\u{30FF}').contains(&c)
+            || ('\u{AC00}'..='\u{D7AF}').contains(&c)
+    })
+}
+
+fn clip_title(query: &str) -> String {
+    let flat = query.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = String::new();
+    for ch in flat.chars() {
+        if out.chars().count() >= 24 {
+            out.push('…');
+            break;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -2158,6 +2192,28 @@ mod tests {
             url: url.into(),
             ..SearchResult::default()
         }
+    }
+
+    #[test]
+    fn a_chinese_question_keeps_a_chinese_title() {
+        assert_eq!(
+            title_in_query_language("现在东京几点", "Current Tokyo Time"),
+            "现在东京几点"
+        );
+        assert_eq!(
+            title_in_query_language("特斯拉今天的股价是多少", "特斯拉今日股价"),
+            "特斯拉今日股价"
+        );
+        assert_eq!(
+            title_in_query_language("why is the sky blue", "Why the sky is blue"),
+            "Why the sky is blue"
+        );
+        let long = "请用中文解释量子计算的基本原理以及它和经典计算的差别在哪里";
+        assert!(title_in_query_language(long, "Quantum computing basics").ends_with('…'));
+        assert!(uses_cjk(&title_in_query_language(
+            long,
+            "Quantum computing basics"
+        )));
     }
 
     #[test]
