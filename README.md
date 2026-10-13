@@ -1,76 +1,136 @@
-# Libra
+<h1 align="center">⚖️ Libra</h1>
 
-A self-hosted answer engine, and a self-hosted Perplexity: ask in plain language and get a cited
-answer from the open web, on your own hardware. It is a rebuild of [Vane](https://github.com/ItzCrazyKns/Vane)
-with a **Rust + Redis + SQLite** backend and a **Next.js** frontend. One binary serves the API and
-the pre-built UI; Redis is a cache, not a requirement.
+<p align="center">
+<b>A self-hosted answer engine — a Perplexity you run yourself.</b><br>
+Ask in plain language, get a cited answer from the open web, on your own hardware.<br>
+Rust + axum + SQLite, an optional Redis cache, a Next.js front end.<br>
+One binary serves the API and the pre-built UI.
+</p>
+
+<p align="center">
+<img src="docs/screenshots/answer.png" alt="A Libra answer: markdown with inline [n] citations, a sources rail, and follow-up questions" width="1200">
+</p>
+
+<p align="center">
+<a href="LICENSE">MIT</a> · <a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How it works</a> · <a href="#http-api">HTTP API</a> · <a href="#configuration">Configuration</a>
+</p>
+
+---
+
+## What you get
+
+- **Cited answers, not links.** Every claim carries an `[n]` that points at the source it came from. Copy with citations, or export the turn as `.md`.
+- **A research loop you can tune.** `Fast` runs one round of searches, `Balance` adds a follow-up round, `Deep` adds two. The same question, three levels of effort.
+- **Any model you already have.** Ollama, LM Studio, vLLM, OpenAI, OpenRouter, Anthropic, Gemini, or any OpenAI-compatible server — and a different model for the answer, the background chores, and the reranking.
+- **Search that degrades gracefully.** SearxNG, Brave, Tavily, Exa, DuckDuckGo, Bing HTML scraping and Firecrawl, tried in an order you set per result kind. No key? Self-hosted SearxNG works alone.
+- **Answers that do things.** Calculator, world clock, weather (Open-Meteo) and stock quotes with charts (Nasdaq) render as blocks above the prose.
+- **Your files and your photos.** Upload `txt`, `md`, `csv`, `pdf`, `docx` or images; documents are chunked, embedded and retrieved by cosine similarity, images go to a vision model.
+- **Image and video results, a Discover feed** (tech, finance, art, sports, entertainment) that opens a thread summarising the story, and optional image generation.
+- **Multilingual.** Ask in Chinese, get a Chinese answer and a Chinese thread title.
+- **Stops, survives, reloads.** Answers stream over SSE; reloading mid-answer restores the partial turn and keeps polling. Stopping keeps what was written. No accounts, no cookies, no telemetry.
+- **Made for reading.** Serif or sans answer typeface, an answer-width slider, light / dark / system, `/` to ask from anywhere, `N` for a new thread.
+
+<p align="center">
+<b>Dark mode</b> — the same thread at 2 a.m. &nbsp;·&nbsp; <b>The empty state</b> is the whole onboarding.<br>
+<img src="docs/screenshots/answer-dark.png" alt="Dark theme" width="590"> <img src="docs/screenshots/home.png" alt="Home" width="590">
+</p>
+
+<p align="center">
+<b>Settings → Model providers</b>: add a provider, list its models, done. &nbsp;·&nbsp; <b>On a phone</b>: the same thread, sources in a sheet.<br>
+<img src="docs/screenshots/settings.png" alt="Model providers settings" width="590"> <img src="docs/screenshots/mobile-sources.png" alt="Mobile sources sheet" width="250">
+</p>
+
+## How it works
 
 ```
-question → classify → widgets ┐
-         → plan searches      ├→ SSE stream → answer with [n] citations → follow-ups
-         → search rounds / RAG┘
+question
+  ↓
+classify          normal / coding / follow-up / quick lookup, + should the answer carry images or videos
+  ↓               → calculator · world clock · weather · stock quotes
+plan searches     the light model picks the queries, in the question's language
+  ↓
+search rounds     fast = 1 round · balance = 2 · deep = 3
+  ↓
+filter → rerank   the light model drops dead sources, the rerank model orders the rest
+  ↓
+answer            the answer model writes, citing [n] for every claim
+  ↓
+references · images · videos · follow-up questions
 ```
 
-## Why this shape
+Uploaded documents (chunked + embedded) and attached images are retrieved alongside the web
+searches and land in the same reference list. Everything above streams to the browser as blocks
+over one SSE connection, and every block is stored, so a thread reloads exactly as it was answered.
 
-| | original | Libra |
+### Why this shape
+
+| | [Vane](https://github.com/ItzCrazyKns/Vane) (what this is a rebuild of) | Libra |
 |---|---|---|
 | backend | Next.js (Node) | Rust (axum), single static binary |
 | storage | SQLite (drizzle) | SQLite (sqlx, WAL) |
 | cache | none | Redis: search results, embeddings, discover, single-flight |
-| research loop | native tool-calling, 2–25 iterations | plan the queries, then 1, 2, or 3 search rounds (fast, balance, deep) |
+| research loop | native tool-calling, 2–25 iterations | plan the queries, then 1, 2 or 3 search rounds (fast, balance, deep) |
 | providers | OpenAI/Anthropic/Gemini/Groq/Ollama/… | OpenAI-compatible (incl. OpenRouter, Ollama, LM Studio), Anthropic, Gemini |
 | search | SearxNG only | SearxNG, Brave, Tavily, Exa, DuckDuckGo, Bing HTML scrape, Firecrawl — per-kind ordered fallback |
 | UI | full React app | lean Next.js app, statically exported and served by the Rust binary |
 
-The research loop is the main behavioural deviation: upstream drives a multi-iteration agent
-through native tool calls, which needs a strong model. Libra asks the fast model what to search first, runs those queries, then asks it what to search
-next. Balance does one follow-up round and Deep does two; Fast stops after the first. The fast
-model then drops sources that cannot help, the rerank model orders what remains, and a stronger
-model writes. Pages are not scraped one by one.
+The research loop is the main behavioural deviation. Upstream drives a multi-iteration agent
+through native tool calls, which needs a strong model. Libra instead asks the **fast** model what
+to search first, runs those queries, then asks it what to search next. Balance does one follow-up
+round, Deep does two, Fast stops after the first. The fast model then drops sources that cannot
+help, the **rerank** model orders what remains, and the **answer** model writes. Pages are not
+scraped one by one — the snippets you searched are the snippets you answer from.
+
+Three model slots, so a 7B local model can plan and filter while a bigger one writes:
+
+```
+answer   → the writer. Strong, slow is fine.
+light    → classify, plan searches, filter sources, titles, follow-ups. Fast and cheap.
+rerank   → orders the surviving sources by relevance.
+```
 
 ## Quickstart
 
 ```bash
-docker compose up --build      # UI + API on http://localhost:3001
+docker compose up --build          # UI + API on http://localhost:3001
 ```
 
-A fresh instance has no model providers. Open `http://localhost:3001/settings/?tab=providers`, add
-one (Ollama, OpenAI, OpenRouter, Anthropic, Gemini or any OpenAI-compatible server) with the models
-it serves, and ask something.
+That brings up Libra, Redis and a SearxNG metasearch container. A fresh instance has no model
+providers: open **`http://localhost:3001/settings/?tab=providers`**, add one (Ollama, OpenAI,
+OpenRouter, Anthropic, Gemini or any OpenAI-compatible server) with the models it serves, and ask
+something. Nothing else needs configuring — search works through the bundled SearxNG.
 
 ### Without Docker
 
 ```bash
-cp .env.example .env            # edit keys
-cargo run                       # API + UI on :3001 (expects web/out)
+cp .env.example .env                # optional: search keys, Redis, ports
+cargo run                           # API + UI on :3001 (serves web/out)
 
-# frontend development (hot reload, proxies /api to :3001)
-cd web && npm install && npm run dev   # http://localhost:3000
+# front end development, hot reload, proxies /api to :3001
+cd web && npm install && npm run dev    # http://localhost:3000
 ```
 
-Redis is optional: if `REDIS_URL` is unreachable the service logs a warning and runs with
-caching disabled. Set `REDIS_DISABLED=1` to skip the connection attempt entirely.
+Build the UI first if `web/out` is missing: `cd web && npm run build`.
 
-## Layout
+Redis is optional. If `REDIS_URL` is unreachable the service logs a warning and runs with caching
+disabled; `REDIS_DISABLED=1` skips the connection attempt entirely. SearxNG and every search key are
+optional too — a provider is skipped when it has no key, is disabled, or returns nothing, and the
+first provider that yields results wins.
+
+## Configuration
+
+Everything in `.env.example` can also be changed at runtime from `/settings`. Precedence:
 
 ```
-src/
-  main.rs            startup, config, graceful shutdown
-  api.rs             axum router: /api/* + static UI
-  config.rs          env + settings.json, hot-swappable SettingsHandle
-  db.rs              sqlx pool, migrations, chats/messages/documents/chunks
-  cache.rs           Redis wrapper; degrades to no-op
-  blocks.rs          block protocol streamed to the UI
-  llm/               openai-compatible, anthropic, gemini; SSE + JSON extraction
-  search/            provider trait + 7 providers + fallback router with Redis cache
-  pipeline/          ask(): classify → widgets → plan searches → search rounds → rerank → answer → suggestions
-  uploads/           text/pdf/docx extraction, chunking, embedding, cosine retrieval
-  widgets/           calculator, time, weather (Open-Meteo), stocks (Nasdaq)
-  prompts/           every LLM prompt, all returning strict JSON
-web/                 Next.js app router + plain CSS from the design/ mockups (static export)
-docker/              searxng settings
+env vars  →  $LIBRA_DATA_DIR/settings.json  →  PUT /api/settings (live, no restart)
 ```
+
+Settings are held in an `Arc<RwLock<Config>>`; a change swaps the `Arc` and each in-flight request
+keeps the snapshot it started with. No subsystem rebuild, no restart. Model providers and the models
+chosen from them are the exception — those come only from Settings, never from env vars.
+
+Search fallback order is per kind (`WEB_SEARCH_ORDER`, `NEWS_SEARCH_ORDER`, `IMAGE_SEARCH_ORDER`,
+`VIDEO_SEARCH_ORDER`).
 
 ## HTTP API
 
@@ -85,48 +145,80 @@ docker/              searxng settings
 | `POST /api/upload` | multipart `chatId` + `files[]` → `{files:[{id,name,chunks}]}` |
 | `GET /api/search?q=&kind=web\|news\|images\|videos` | raw provider results (Redis cached) |
 | `GET /api/suggestions?q=` | search autocomplete |
-| `GET /api/discover?topic=tech\|finance\|art\|sports\|entertainment` | recent news for that topic; a story opens a thread that summarizes its URL |
+| `GET /api/discover?topic=tech\|finance\|art\|sports\|entertainment` | recent news for that topic; a story opens a thread that summarises its URL |
 | `POST /api/generate/image` | `{prompt}` → base64 image (needs an image model) |
-| `GET /api/settings` · `PUT /api/settings` | read/patch the whole config, applied hot |
+| `GET /api/stocks/{symbol}` | chart series for the stocks widget |
+| `GET /api/settings` · `PUT /api/settings` | read / patch the whole config, applied hot |
 | `GET /api/models` · `GET /api/health` | model ids · status + redis + providers |
 
-SSE frames are `data: {...}` with `type`: `id` (chat id), `b` (block), `t` (reasoning delta), `a` (answer text delta),
-`loc` (ask the browser for a location; `precise` true means coordinates), `c` (error), `e` (end). Blocks are `{type, message, data}` — `answered`, `widget`, `weather`,
+SSE frames are `data: {...}` with `type`: `id` (chat id), `b` (block), `t` (reasoning delta),
+`a` (answer text delta), `loc` (ask the browser for a location; `precise: true` means coordinates),
+`c` (error), `e` (end). Blocks are `{type, message, data}` — `answered`, `widget`, `weather`,
 `stocks`, `calculation`, `time`, `research`, `references`, `images`, `videos`, `related`, `message`.
-The question is written to SQLite as soon as the ask starts, and the answer's phase
-(`search`, `read`, `write`, then `done`, `stopped`, or `error`), blocks, and text are
-updated as they arrive. Reloading the page restores that row immediately and keeps
-polling while the phase is still in progress. A process restart marks any in-progress
-turn stopped, so a thread is never stuck on "answering".
 
-## Configuration
+The question is written to SQLite as soon as the ask starts, and the answer's phase (`search`,
+`read`, `write`, then `done`, `stopped` or `error`), blocks and text are updated as they arrive.
+Reloading the page restores that row immediately and keeps polling while the phase is still in
+progress. A process restart marks any in-progress turn stopped, so a thread is never stuck on
+"answering".
 
-Everything in `.env.example` can also be changed at runtime from `/settings` (written to
-`$LIBRA_DATA_DIR/settings.json`, applied to the live `SettingsHandle` without a restart).
-Env vars seed defaults; `settings.json` overrides them; the API overrides both. Model providers and
-the models chosen from them are the exception: they only come from Settings, never from env vars.
+## Layout
 
-Search fallback order is per kind (`WEB_SEARCH_ORDER`, …). A provider is skipped when it has no
-key, is disabled, or returns nothing — the first provider with results wins.
-
-## Tests
-
-```bash
-cargo test                     # unit tests: prompts, json extraction, chunking, docx, config
-python3 scripts/mock-llm.py &  # OpenAI-compatible stub on :8899, no API keys needed
-cargo run &                    # then PUT /api/settings with a "mock" provider and POST /api/ask
+```
+src/
+  main.rs            startup, config, graceful shutdown
+  api.rs             axum router: /api/* + static UI
+  config.rs          env + settings.json, hot-swappable SettingsHandle
+  db.rs              sqlx pool, migrations, chats/messages/documents/chunks
+  cache.rs           Redis wrapper; degrades to a no-op
+  blocks.rs          the block protocol streamed to the UI
+  llm/               openai-compatible, anthropic, gemini; SSE + JSON extraction
+  search/            provider trait + 7 providers + fallback router with Redis cache
+  pipeline/          ask(): classify → widgets → plan → rounds → filter → rerank → answer → suggestions
+  uploads/           text/pdf/docx/image extraction, chunking, embedding, cosine retrieval
+  widgets/           calculator, time, weather (Open-Meteo), stocks (Nasdaq)
+  prompts/           every LLM prompt; all of them return strict JSON
+web/                 Next.js app router + plain CSS from the design/ mockups (static export)
+design/              static HTML mockups the UI was built from
+docker/              searxng settings
 ```
 
-`scripts/mock-llm.py` answers every prompt with fixed JSON and streams a fake answer, which is
-enough to exercise the whole pipeline end to end.
+## Development
 
-## Not implemented (yet)
+```bash
+cargo run                          # backend on :3001
+cd web && npm run dev              # frontend on :3000, /api proxied to :3001
+cargo test                         # prompts, JSON extraction, chunking, docx, config, widgets
+```
 
-- Per-result page extraction: Firecrawl's scrape endpoint is implemented but not wired into the answer path.
-- Currency conversion in the calculator, and the upstream "discussion mode" long-form writer.
-- Auth: the service is assumed to sit behind a reverse proxy. CORS is wide open for dev.
-- Embedding search is brute-force cosine over SQLite BLOBs — fine up to a few thousand chunks.
+The whole pipeline can be exercised without a single API key:
+
+```bash
+python3 scripts/mock-llm.py &      # OpenAI-compatible stub on :8899
+cargo run &                        # add a "mock" provider in Settings pointing at it
+```
+
+The stub answers every prompt with fixed JSON and streams a fake answer, which is enough to drive
+classify → search → rerank → answer → suggestions end to end.
+
+The screenshots in this README were taken that way: the real UI and the real pipeline, driven by a
+stub OpenAI-compatible model (same trick as `scripts/mock-llm.py`, with different canned text) and a
+stub SearxNG, so they do not depend on anyone's API keys. The answer text and the source list are
+representative rather than real.
+
+## Known limits
+
+- **No page scraping in the answer path.** Answers come from search snippets. Firecrawl's scrape endpoint is implemented but not wired in yet.
+- **No auth.** The service assumes it sits behind a reverse proxy. CORS is wide open for development — do not expose it to the internet as-is.
+- **Embedding search is brute-force cosine** over SQLite BLOBs. Fine up to a few thousand chunks.
+- **No currency conversion** in the calculator, and no upstream "discussion mode" long-form writer.
+
+## Acknowledgements
+
+Rebuilds the architecture and much of the behaviour of [Vane](https://github.com/ItzCrazyKns/Vane)
+by ItzCrazyKns. Search by [SearxNG](https://github.com/searxng/searxng), weather by
+[Open-Meteo](https://open-meteo.com/), stock quotes by Nasdaq's public endpoints.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE)
