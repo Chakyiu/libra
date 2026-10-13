@@ -11,7 +11,7 @@ ANSWER = (
 )
 
 
-def classify(system: str) -> str | None:
+def classify(system: str, user: str) -> str | None:
     if system.startswith("You are an expert at categorizing"):
         return json.dumps({
             "type": "normal",
@@ -21,6 +21,8 @@ def classify(system: str) -> str | None:
             "content_generation": None,
         })
     if system.startswith("You are a widget selection"):
+        if "usd" in user.lower() or "eur" in user.lower():
+            return json.dumps({"widgets": [{"name": "calculator", "input": "100 USD to EUR"}]})
         return json.dumps({"widgets": [{"name": "calculator", "input": "12 * 7"}]})
     if system.startswith("You are a search result relevance"):
         return json.dumps({"selected": [1, 2, 3]})
@@ -32,6 +34,8 @@ def classify(system: str) -> str | None:
         return json.dumps({"title": "Rust and Redis", "emoji": "🦀"})
     if system.startswith("You decide whether a follow-up"):
         return json.dumps({"needs_follow_up": True, "question": "rust redis performance"})
+    if system.startswith("You plan the sections of a long-form"):
+        return json.dumps({"sections": ["Opening", "How it works", "Tradeoffs", "What to watch"]})
     return None
 
 
@@ -53,7 +57,8 @@ class Handler(BaseHTTPRequestHandler):
 
         messages = body.get("messages", [])
         system = next((m["content"] for m in messages if m["role"] == "system"), "")
-        fixed = classify(system)
+        user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        fixed = classify(system, user)
         content = fixed if fixed is not None else ANSWER
 
         if not body.get("stream"):

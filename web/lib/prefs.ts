@@ -17,6 +17,8 @@ export type Prefs = {
   model: string;
   /** how many search rounds a question gets */
   depth: "fast" | "balance" | "deep";
+  /** a short cited answer, or a long-form report written section by section */
+  mode: "answer" | "discussion";
 };
 
 export const PREF_DEFAULTS: Prefs = {
@@ -27,6 +29,7 @@ export const PREF_DEFAULTS: Prefs = {
   rail: true,
   model: "",
   depth: "balance",
+  mode: "answer",
 };
 
 const KEY: Record<keyof Prefs, string> = {
@@ -37,6 +40,7 @@ const KEY: Record<keyof Prefs, string> = {
   rail: "libra:rail",
   model: "libra:model",
   depth: "libra:depth",
+  mode: "libra:mode",
 };
 
 const listeners = new Set<() => void>();
@@ -60,6 +64,8 @@ function parse<K extends keyof Prefs>(key: K, raw: string | null): Prefs[K] {
       return (raw !== "0") as Prefs[K];
     case "depth":
       return (raw === "fast" || raw === "deep" ? raw : "balance") as Prefs[K];
+    case "mode":
+      return (raw === "discussion" ? raw : "answer") as Prefs[K];
     default:
       return raw as Prefs[K];
   }

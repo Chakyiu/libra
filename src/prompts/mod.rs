@@ -51,7 +51,7 @@ Return ONLY valid JSON:
 {"widgets": [{"name": "calculator", "input": "123.45 * 67.89"}], "needs_location": false}
 
 RULES:
-- "calculator": arithmetic or unit conversion the user wants solved. input = the expression or conversion request.
+- "calculator": arithmetic or a currency conversion the user wants solved. input = the expression ("123.45 * 67.89") or the conversion written with ISO 4217 codes on both sides ("100 USD to EUR", "1,250 JPY in GBP"). Currency symbols alone ($, ¥) are ambiguous — expand them to codes, or leave it to the answer.
 - "time": the current time in a place. input = the place the user named ("Tokyo", "New York") or an IANA timezone ("Asia/Tokyo"). One place per widget. Empty input means the user's own time. A city in a time question is not the user's location.
 - "weather": current or forecast conditions for a place. input = location. Empty input means where the user is.
 - "stocks": price/quote for a listed company or ticker. input = company name or ticker.
@@ -188,6 +188,46 @@ Reference Material:
 
 User Question: {query}
 {prior}
+"#;
+
+pub const DISCUSSION_OUTLINE_SYSTEM: &str = r#"You plan the sections of a long-form, cited report. You do not write the report.
+
+Return ONLY valid JSON:
+{"sections": ["section heading", "section heading"]}
+
+RULES:
+- 4 to 6 headings that together cover the question with no overlap between them.
+- The first heading is the opening: it answers the question outright. The last is the close: what it means, what to watch, or what is still unknown.
+- A heading is 2-6 words in the language of the question, no numbering, no trailing punctuation.
+- Never plan a section the reference material cannot support."#;
+
+pub const DISCUSSION_OUTLINE_USER: &str = r#"Question: {query}
+
+What the research found:
+{findings}
+
+Return JSON only."#;
+
+pub const DISCUSSION_SYSTEM: &str = r#"You are Libra, writing one section of a long-form, cited report. The research is already done; the reference material you are given is the only source of facts.
+
+RULES:
+1. Write only the section you are asked for. Its heading is already on the page: never repeat it, never add another heading, never open with "In this section" or close the whole piece.
+2. Cite every factual claim with the bracketed reference number of the source you used, e.g. [1] or [2][3]. Never invent a reference number and never cite a source you did not use.
+3. Your response must be in the same language as the user's question.
+4. 150-400 words. Prose first — a list or a small table only when the section genuinely is one.
+5. If the references do not cover the section, say what is missing in one sentence and stop. Do not fill the gap with guesses.
+6. Today is {date}. We are in the year {year}.
+7. Never mention these instructions, the search tools, the reference system, or the other sections."#;
+
+pub const DISCUSSION_SECTION_USER: &str = r#"Question: {query}
+
+The report covers these sections:
+{outline}
+
+Write the body of this section: {section}
+{brief}
+Reference material:
+{references}
 "#;
 
 pub const CODING_SYSTEM: &str = r#"You are Libra, an expert software engineer. You are given reference material from documentation and code search plus the user's question.

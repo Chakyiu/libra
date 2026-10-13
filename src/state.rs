@@ -69,7 +69,7 @@ impl App {
             .pool_max_idle_per_host(16)
             .build()?;
         let search = Arc::new(SearchHub::new(&http, settings.clone(), cache.clone()));
-        let widgets = Arc::new(Registry::new(&http, settings.clone()));
+        let widgets = Arc::new(Registry::new(&http, settings.clone(), cache.clone()));
         let uploads = Arc::new(UploadStore::new(
             &http,
             settings.clone(),

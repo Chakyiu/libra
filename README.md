@@ -20,14 +20,16 @@ One binary serves the API and the pre-built UI.
 ## What you get
 
 - **Cited answers, not links.** Every claim carries an `[n]` that points at the source it came from. Copy with citations, or export the turn as `.md`.
+- **Two lengths.** A short answer leads with the result and stops. A **discussion report** plans 4–6 sections from the same research and writes them one after another — still cited, still one stream.
 - **A research loop you can tune.** `Fast` runs one round of searches, `Balance` adds a follow-up round, `Deep` adds two. The same question, three levels of effort.
 - **Any model you already have.** Ollama, LM Studio, vLLM, OpenAI, OpenRouter, Anthropic, Gemini, or any OpenAI-compatible server — and a different model for the answer, the background chores, and the reranking.
 - **Search that degrades gracefully.** SearxNG, Brave, Tavily, Exa, DuckDuckGo, Bing HTML scraping and Firecrawl, tried in an order you set per result kind. No key? Self-hosted SearxNG works alone.
-- **Answers that do things.** Calculator, world clock, weather (Open-Meteo) and stock quotes with charts (Nasdaq) render as blocks above the prose.
+- **Answers that do things.** Calculator, currency conversion, world clock, weather (Open-Meteo) and stock quotes with charts (Nasdaq) render as blocks above the prose.
 - **Your files and your photos.** Upload `txt`, `md`, `csv`, `pdf`, `docx` or images; documents are chunked, embedded and retrieved by cosine similarity, images go to a vision model.
 - **Image and video results, a Discover feed** (tech, finance, art, sports, entertainment) that opens a thread summarising the story, and optional image generation.
 - **Multilingual.** Ask in Chinese, get a Chinese answer and a Chinese thread title.
 - **Stops, survives, reloads.** Answers stream over SSE; reloading mid-answer restores the partial turn and keeps polling. Stopping keeps what was written. No accounts, no cookies, no telemetry.
+- **Optional access token.** Set one env var and every `/api` call needs it; cross-origin access is closed by default. See [Securing it](#securing-it).
 - **Made for reading.** Serif or sans answer typeface, an answer-width slider, light / dark / system, `/` to ask from anywhere, `N` for a new thread.
 
 <p align="center">
@@ -54,7 +56,7 @@ search rounds     fast = 1 round · balance = 2 · deep = 3
 filter → rerank   the light model drops dead sources, the rerank model orders the rest
   ↓
 answer            the answer model writes, citing [n] for every claim
-  ↓
+  ↓               → a discussion report outlines 4–6 sections first, then writes them one by one
 references · images · videos · follow-up questions
 ```
 
@@ -132,11 +134,36 @@ chosen from them are the exception — those come only from Settings, never from
 Search fallback order is per kind (`WEB_SEARCH_ORDER`, `NEWS_SEARCH_ORDER`, `IMAGE_SEARCH_ORDER`,
 `VIDEO_SEARCH_ORDER`).
 
+### Securing it
+
+Out of the box Libra has no accounts and no login: it trusts whoever can reach the port. Two env
+vars change that.
+
+```bash
+LIBRA_AUTH_TOKEN=$(openssl rand -hex 24)   # every /api request needs Authorization: Bearer <token>
+LIBRA_ALLOWED_ORIGINS=                     # browser origins allowed to call /api cross-origin
+```
+
+With a token set, the UI shows an unlock screen once per browser and keeps the token in
+`localStorage`. It is read from the environment only — never from `settings.json`, and never
+returned by `GET /api/settings`. `/api/health` needs it too, so a locked instance leaks nothing
+about your providers.
+
+`LIBRA_ALLOWED_ORIGINS` is **empty by default**, which means same-origin only: the single-binary
+deployment serves the UI and the API from one origin, so it needs no CORS at all, and the Next dev
+server proxies `/api` server-side. List origins (`http://localhost:3000`) only if you split them,
+and set `LIBRA_ALLOWED_ORIGINS=*` to go back to the wide-open development layer — on a trusted
+network only.
+
+One token guards the whole instance; there are no users. The static UI is always public — it is an
+empty app shell, every route that reads or writes data lives under `/api`. Put TLS and any real
+multi-user auth in front of it with a reverse proxy.
+
 ## HTTP API
 
 | | |
 |---|---|
-| `POST /api/ask` | SSE stream. Body `{id, query, model, models:{answer,light,rerank}, depth:fast\|balance\|deep, files:[id], message_history:[{role,content}], filters:{country,language,freshness,perplexity_site}, disabled_widgets:[]}`. `depth` defaults to balance. |
+| `POST /api/ask` | SSE stream. Body `{id, query, model, models:{answer,light,rerank}, depth:fast\|balance\|deep, mode:answer\|discussion, files:[id], message_history:[{role,content}], filters:{country,language,freshness,perplexity_site}, disabled_widgets:[]}`. `depth` defaults to balance, `mode` to answer. |
 | `GET /api/chats` · `POST /api/chats` | list / create. Each chat includes `status`, the phase of its latest answer |
 | `GET /api/chats/{id}` | `{chat, messages:[{id,role,content,blocks,files,status,error,model,elapsed_ms,created_at}]}` |
 | `PATCH /api/chats/{id}` | rename `{title, emoji}` · `DELETE` removes it |
@@ -156,6 +183,9 @@ SSE frames are `data: {...}` with `type`: `id` (chat id), `b` (block), `t` (reas
 `c` (error), `e` (end). Blocks are `{type, message, data}` — `answered`, `widget`, `weather`,
 `stocks`, `calculation`, `time`, `research`, `references`, `images`, `videos`, `related`, `message`.
 
+Every `/api` route rejects with `401` when `LIBRA_AUTH_TOKEN` is set and the bearer token is
+missing or wrong.
+
 The question is written to SQLite as soon as the ask starts, and the answer's phase (`search`,
 `read`, `write`, then `done`, `stopped` or `error`), blocks and text are updated as they arrive.
 Reloading the page restores that row immediately and keeps polling while the phase is still in
@@ -174,9 +204,9 @@ src/
   blocks.rs          the block protocol streamed to the UI
   llm/               openai-compatible, anthropic, gemini; SSE + JSON extraction
   search/            provider trait + 7 providers + fallback router with Redis cache
-  pipeline/          ask(): classify → widgets → plan → rounds → filter → rerank → answer → suggestions
+  pipeline/          ask(): classify → widgets → plan → rounds → filter → rerank → answer (or report) → suggestions
   uploads/           text/pdf/docx/image extraction, chunking, embedding, cosine retrieval
-  widgets/           calculator, time, weather (Open-Meteo), stocks (Nasdaq)
+  widgets/           calculator, currency (ECB rates), time, weather (Open-Meteo), stocks (Nasdaq)
   prompts/           every LLM prompt; all of them return strict JSON
 web/                 Next.js app router + plain CSS from the design/ mockups (static export)
 design/              static HTML mockups the UI was built from
@@ -209,9 +239,11 @@ representative rather than real.
 ## Known limits
 
 - **No page scraping in the answer path.** Answers come from search snippets. Firecrawl's scrape endpoint is implemented but not wired in yet.
-- **No auth.** The service assumes it sits behind a reverse proxy. CORS is wide open for development — do not expose it to the internet as-is.
+- **One shared token, not users.** `LIBRA_AUTH_TOKEN` is a single secret for the whole instance: no accounts, no per-thread ownership, no session expiry. Everything else about who may reach the port is your reverse proxy's job.
+- **Currency rates are the ECB's daily reference set.** About 30 currencies from Frankfurter, with ExchangeRate-API as a fallback for the rest; a pair neither lists renders no widget. Rates update once a day and are cached for 6 hours.
+- **A discussion report is one pass per section.** The sections do not see each other's prose, only the outline, so a report reads as six good paragraphs rather than one argued piece. It also costs 4–6 answer-model calls instead of one.
+- **A stuck reasoner is cut off, not fixed.** If the answer model repeats itself while thinking, the stream is stopped after a few cycles and the turn reports it — an endless trace used to burn the whole context and save an empty answer. The light-model calls (plan, filter, rerank) are bounded by a token cap instead, so a loop there costs one slow round and falls back.
 - **Embedding search is brute-force cosine** over SQLite BLOBs. Fine up to a few thousand chunks.
-- **No currency conversion** in the calculator, and no upstream "discussion mode" long-form writer.
 
 ## Acknowledgements
 

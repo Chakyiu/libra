@@ -122,6 +122,82 @@ impl Mind<'_> {
         self.text.push_str(chunk);
         let _ = self.tx.send(Event::Thought(chunk.to_string()));
     }
+
+    /// Roll the trace back to just before the repeated line, so a thread that hit a
+    /// reasoning loop keeps the thinking that came before it instead of the garbage.
+    fn cut_loop(&mut self, line: &str) {
+        if let Some(i) = self.text.rfind(line) {
+            self.text.truncate(i);
+        }
+    }
+}
+
+/// A reasoning model can fall into a repetition loop inside its thinking — the same
+/// `Need mention X [12]. Good.` line forever — and spend the whole context window before it
+/// writes a word of the answer. The answer call has no token cap (a long answer must not be
+/// cut off), so the loop has to be recognised rather than bounded. Watched on the reasoning
+/// trace only: an answer legitimately repeats short lines (table rules), thinking does not
+/// repeat long ones.
+pub struct LoopGuard {
+    /// the last `WINDOW` non-trivial thought lines, oldest first
+    lines: std::collections::VecDeque<String>,
+    /// the line still being streamed
+    pending: String,
+    chars: usize,
+}
+
+/// How much thinking is pathological whatever it says: roughly 10k tokens.
+const BUDGET: usize = 40_000;
+const WINDOW: usize = 60;
+const SHORTEST: usize = 24;
+
+/// What the user sees when the model loops. An empty answer with no provider error is
+/// otherwise indistinguishable from a model that simply had nothing to say.
+const LOOPING: &str = "the model got stuck repeating itself while reasoning and never wrote an answer. Try a model that thinks less, a lower Temperature, or fewer Sources per answer.";
+const BUDGET_USED: &str = "the model spent its whole token budget on reasoning and wrote no answer. Try a model that thinks less, or a lower Temperature.";
+const NO_TEXT: &str = "the model returned no answer text.";
+
+impl Default for LoopGuard {
+    fn default() -> Self {
+        Self {
+            lines: Default::default(),
+            pending: String::new(),
+            chars: 0,
+        }
+    }
+}
+
+impl LoopGuard {
+    /// The line whose repetition ended the trace, when the trace has looped.
+    pub fn feed(&mut self, chunk: &str) -> Option<String> {
+        self.chars += chunk.chars().count();
+        if self.chars > BUDGET {
+            return Some(String::new());
+        }
+        self.pending.push_str(chunk);
+        while let Some(i) = self.pending.find('\n') {
+            let line: String = self.pending.drain(..=i).collect();
+            if let Some(hit) = self.watch(&line) {
+                return Some(hit);
+            }
+        }
+        None
+    }
+
+    fn watch(&mut self, raw: &str) -> Option<String> {
+        let line = raw.trim();
+        if line.chars().count() < SHORTEST {
+            return None;
+        }
+        let line: String = line.chars().take(200).collect();
+        // Three copies of the same long line inside a page of thinking is a loop, not emphasis.
+        let again = self.lines.iter().filter(|l| **l == line).count() >= 2;
+        self.lines.push_back(line.clone());
+        if self.lines.len() > WINDOW {
+            self.lines.pop_front();
+        }
+        again.then_some(line)
+    }
 }
 
 fn store_thought(blocks: &mut Vec<Block>, thought: &str) {
@@ -331,6 +407,9 @@ pub struct AskRequest {
     /// "fast" | "balance" | "deep". Empty means balance.
     #[serde(default)]
     pub depth: String,
+    /// "answer" (default) or "discussion" — a long-form report written section by section.
+    #[serde(default)]
+    pub mode: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -636,6 +715,7 @@ impl Pipeline {
             Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
         };
         let clocked = crate::widgets::clock_facts(&widget_blocks);
+        let converted = crate::widgets::currency_facts(&widget_blocks);
         if !clocked.is_empty() && crate::widgets::pure_clock(&req.query, &choice.requested) {
             cls.need_web_search = false;
             cls.needs_image_results = false;
@@ -929,6 +1009,11 @@ impl Pipeline {
 
         // 8. the answer itself. Every path gets today's date, including images,
         // documents, and code, where the template has no {date} placeholder.
+        // A report is only worth outlining for a cited web answer: documents and photos
+        // keep the single-pass writer.
+        let long_form = req.mode.trim().eq_ignore_ascii_case("discussion")
+            && document_context.is_none()
+            && pictures.is_empty();
         let system = with_place(
             with_today(if !pictures.is_empty() && document_context.is_none() {
                 if candidates.is_empty() {
@@ -974,20 +1059,16 @@ impl Pipeline {
                 ],
             )
         };
-        let user_prompt = with_clock(user_prompt, &clocked);
+        let facts = joined_facts(&[&clocked, &converted]);
+        let user_prompt = with_clock(user_prompt, &facts);
 
-        let mut messages: Vec<Msg> = Vec::new();
+        let mut history: Vec<Msg> = Vec::new();
         for m in req.message_history.iter().rev().take(10).rev() {
             if m.role == "user" || m.role == "assistant" {
-                messages.push(m.clone());
+                history.push(m.clone());
             }
         }
-        let mut ask = msg("user", &user_prompt);
-        ask.images = pictures
-            .into_iter()
-            .map(|(mime, data)| crate::llm::InlineImage { mime, data })
-            .collect();
-        messages.push(ask);
+        let temperature = Some(cfg.default_temperature);
 
         if self.halt(&turn, &answer, &blocks, &tx).await {
             return;
@@ -995,79 +1076,148 @@ impl Pipeline {
         if !mind.text.is_empty() {
             mind.push("\n\n");
         }
-        let mut rx = match answer_llm
-            .stream(ChatRequest {
-                messages: std::iter::once(msg("system", &system))
-                    .chain(messages.into_iter())
-                    .collect(),
-                temperature: Some(cfg.default_temperature),
-                max_tokens: None,
-                json_mode: false,
-            })
+
+        // Long-form: the light model plans the sections, then the answer model writes them
+        // one at a time. Each call sees the whole reference list, so a 2 000-word report
+        // never leaves the model's working memory the way one long generation would.
+        let outline = if long_form {
+            match cut(
+                &turn.cancel,
+                &tx,
+                self.plan_sections(&light_llm, &req.query, &candidates),
+            )
             .await
-        {
-            Ok(rx) => rx,
-            Err(e) => {
-                let msg = format!("answer model failed: {e}");
-                if !self.halt(&turn, &answer, &blocks, &tx).await {
-                    self.checkpoint(&turn, &answer, &blocks, "error", &msg)
-                        .await;
-                    Self::emit(&tx, Event::Close(Some(msg)));
-                }
-                return;
+            {
+                Ok(sections) => sections,
+                Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
             }
+        } else {
+            Vec::new()
         };
-        turn.cancel.watch_stream(rx.abort_handle());
-        let mut last_flush: Option<Instant> = None;
-        loop {
-            let delta = tokio::select! {
-                biased;
-                _ = turn.cancel.wait() => None,
-                delta = rx.recv() => delta,
-            };
-            let Some(delta) = delta else {
-                break;
-            };
-            match delta {
-                Delta::Text(t) => {
-                    answer.push_str(&t);
-                    Self::emit(&tx, Event::AnswerChunk(t));
-                    let due = last_flush
-                        .map(|t| t.elapsed() >= Duration::from_millis(400))
-                        .unwrap_or(true);
-                    if due {
-                        store_thought(&mut blocks, mind.text);
-                        self.checkpoint(&turn, &answer, &blocks, "write", "").await;
-                        last_flush = Some(Instant::now());
-                    }
+        if !outline.is_empty() {
+            let note = Block::research(
+                depth.as_str(),
+                1,
+                outline.len(),
+                &outline,
+                "Report outline",
+                "write",
+            );
+            blocks.push(note.clone());
+            Self::emit_block(&tx, note);
+            self.checkpoint(&turn, &answer, &blocks, "write", "").await;
+
+            let system = with_place(
+                with_today(prompts::fill(
+                    prompts::DISCUSSION_SYSTEM,
+                    &[("date", &cfg.today()), ("year", &cfg.year())],
+                )),
+                &located,
+            );
+            let contents = outline
+                .iter()
+                .map(|s| format!("- {s}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let last = outline.len() - 1;
+            for (i, section) in outline.iter().enumerate() {
+                if self.halt(&turn, &answer, &blocks, &tx).await {
+                    return;
                 }
-                Delta::Thought(t) => {
-                    mind.push(t);
-                    let due = last_flush
-                        .map(|t| t.elapsed() >= Duration::from_millis(400))
-                        .unwrap_or(true);
-                    if due {
-                        store_thought(&mut blocks, mind.text);
-                        self.checkpoint(&turn, &answer, &blocks, "write", "").await;
-                        last_flush = Some(Instant::now());
-                    }
+                if i > 0 {
+                    // The heading is written here so the model never has to guess it.
+                    let heading = format!("\n\n## {section}\n\n");
+                    answer.push_str(&heading);
+                    Self::emit(&tx, Event::AnswerChunk(heading));
                 }
-                Delta::Truncated => {}
-                Delta::Error(e) => {
-                    tracing::warn!("answer stream error: {e}");
-                    if answer.is_empty() && !turn.cancel.load(Ordering::Acquire) {
-                        turn.cancel.clear_stream();
-                        drop(rx);
-                        self.checkpoint(&turn, &answer, &blocks, "error", &e).await;
-                        Self::emit(&tx, Event::Close(Some(e)));
+                let brief = if i == 0 {
+                    "This is the opening: lead with the answer in the first two sentences."
+                } else if i == last {
+                    "This is the close: what follows from it, or what is still unknown. Do not recap the sections above."
+                } else {
+                    "Stay inside this section — the ones before and after are written separately."
+                };
+                let user = with_clock(
+                    prompts::fill(
+                        prompts::DISCUSSION_SECTION_USER,
+                        &[
+                            ("query", &req.query),
+                            ("outline", &contents),
+                            ("section", section),
+                            ("brief", brief),
+                            ("references", &references),
+                        ],
+                    ),
+                    &facts,
+                );
+                let request = ChatRequest {
+                    messages: std::iter::once(msg("system", &system))
+                        .chain(history.iter().cloned())
+                        .chain(std::iter::once(msg("user", user)))
+                        .collect(),
+                    temperature,
+                    max_tokens: None,
+                    json_mode: false,
+                };
+                if let Err(e) = self
+                    .stream_into(
+                        &answer_llm,
+                        request,
+                        &turn,
+                        &mut blocks,
+                        &mut mind,
+                        &mut answer,
+                        &tx,
+                    )
+                    .await
+                {
+                    if answer.trim().is_empty() {
+                        if !self.halt(&turn, &answer, &blocks, &tx).await {
+                            self.checkpoint(&turn, &answer, &blocks, "error", &e).await;
+                            Self::emit(&tx, Event::Close(Some(e)));
+                        }
                         return;
                     }
+                    // A section failed mid-report. Ship what is written instead of nothing.
+                    tracing::warn!(section = %section, "report section failed: {e}");
                     break;
                 }
             }
+        } else {
+            // 8b. the short answer: one generation over the whole reference list.
+            let mut ask = msg("user", &user_prompt);
+            ask.images = pictures
+                .into_iter()
+                .map(|(mime, data)| crate::llm::InlineImage { mime, data })
+                .collect();
+            let request = ChatRequest {
+                messages: std::iter::once(msg("system", &system))
+                    .chain(history)
+                    .chain(std::iter::once(ask))
+                    .collect(),
+                temperature,
+                max_tokens: None,
+                json_mode: false,
+            };
+            if let Err(e) = self
+                .stream_into(
+                    &answer_llm,
+                    request,
+                    &turn,
+                    &mut blocks,
+                    &mut mind,
+                    &mut answer,
+                    &tx,
+                )
+                .await
+            {
+                if !self.halt(&turn, &answer, &blocks, &tx).await {
+                    self.checkpoint(&turn, &answer, &blocks, "error", &e).await;
+                    Self::emit(&tx, Event::Close(Some(e)));
+                }
+                return;
+            }
         }
-        turn.cancel.clear_stream();
-        drop(rx);
         if self.halt(&turn, &answer, &blocks, &tx).await {
             return;
         }
@@ -1171,6 +1321,134 @@ impl Pipeline {
         }
 
         Self::emit(&tx, Event::Close(None));
+    }
+
+    /// Stream one completion into `answer`, checkpointing as it goes. `Err` only when the
+    /// model failed before writing anything: a failure part way through keeps the text that
+    /// arrived, and a stop is not an error.
+    async fn stream_into(
+        &self,
+        llm: &Llm,
+        request: ChatRequest,
+        turn: &LiveTurn,
+        blocks: &mut Vec<Block>,
+        mind: &mut Mind<'_>,
+        answer: &mut String,
+        tx: &UnboundedSender<Event>,
+    ) -> Result<(), String> {
+        let mut rx = match llm.stream(request).await {
+            Ok(rx) => rx,
+            Err(e) => return Err(format!("answer model failed: {e}")),
+        };
+        turn.cancel.watch_stream(rx.abort_handle());
+        let mut last_flush: Option<Instant> = None;
+        let mut guard = LoopGuard::default();
+        // Did this completion write any answer text? A trace that never becomes an answer is
+        // a failure, not a finished turn — without this the thread saves as "done" and empty.
+        let mut body = false;
+        let mut truncated = false;
+        let mut looped: Option<String> = None;
+        loop {
+            let delta = tokio::select! {
+                biased;
+                _ = turn.cancel.wait() => None,
+                delta = rx.recv() => delta,
+            };
+            let Some(delta) = delta else {
+                break;
+            };
+            let mut wrote = false;
+            match delta {
+                Delta::Text(t) => {
+                    answer.push_str(&t);
+                    Self::emit(tx, Event::AnswerChunk(t));
+                    body = true;
+                    wrote = true;
+                }
+                Delta::Thought(t) => {
+                    if let Some(line) = guard.feed(&t) {
+                        looped = Some(line);
+                        break;
+                    }
+                    mind.push(t);
+                    wrote = true;
+                }
+                Delta::Truncated => truncated = true,
+                Delta::Error(e) => {
+                    tracing::warn!("answer stream error: {e}");
+                    turn.cancel.clear_stream();
+                    drop(rx);
+                    if answer.is_empty() && !turn.cancel.load(Ordering::Acquire) {
+                        return Err(e);
+                    }
+                    return Ok(());
+                }
+            }
+            let due = last_flush
+                .map(|t| t.elapsed() >= Duration::from_millis(400))
+                .unwrap_or(true);
+            if wrote && due {
+                store_thought(blocks, mind.text);
+                self.checkpoint(turn, answer, blocks, "write", "").await;
+                last_flush = Some(Instant::now());
+            }
+        }
+        turn.cancel.clear_stream();
+        drop(rx);
+        if let Some(line) = looped {
+            tracing::warn!(
+                model = %llm.model,
+                line = %line,
+                "reasoning loop: the model repeated itself instead of answering"
+            );
+            // Keep the thinking that came before the loop, drop the cycles after it.
+            mind.cut_loop(&line);
+            store_thought(blocks, mind.text);
+            return if body {
+                Ok(())
+            } else {
+                Err(LOOPING.to_string())
+            };
+        }
+        if !body && !turn.cancel.load(Ordering::Acquire) {
+            return Err(if truncated {
+                BUDGET_USED.to_string()
+            } else {
+                NO_TEXT.to_string()
+            });
+        }
+        Ok(())
+    }
+
+    /// The section list for a long-form report. Fewer than three sections is not a report,
+    /// so an empty list means "write the normal short answer instead".
+    async fn plan_sections(&self, llm: &Llm, query: &str, results: &[SearchResult]) -> Vec<String> {
+        let user = prompts::fill(
+            prompts::DISCUSSION_OUTLINE_USER,
+            &[("query", query), ("findings", &numbered(results))],
+        );
+        let Ok(v) = llm
+            .json_call(prompts::DISCUSSION_OUTLINE_SYSTEM, &user, None)
+            .await
+        else {
+            return Vec::new();
+        };
+        let out: Vec<String> = v["sections"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|s| {
+                s.as_str()
+                    .map(|s| s.trim().trim_start_matches('#').trim().to_string())
+            })
+            .filter(|s| !s.is_empty())
+            .take(6)
+            .collect();
+        if out.len() < 3 {
+            return Vec::new();
+        }
+        out
     }
 
     fn base_query(&self, req: &AskRequest, search_query: &str) -> SearchQuery {
@@ -1613,6 +1891,16 @@ fn with_clock(body: String, facts: &str) -> String {
     } else {
         format!("{facts}\n\n{body}")
     }
+}
+
+/// Widget facts the answer must copy exactly: the converted clock, the converted money.
+fn joined_facts(parts: &[&String]) -> String {
+    parts
+        .iter()
+        .filter(|p| !p.is_empty())
+        .map(|p| p.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Date skill. Answer prompts that already state the date are left as they are.
@@ -2488,5 +2776,89 @@ mod tests {
                 "https://a.example/2".to_string(),
             ]
         );
+    }
+
+    /// The trace from a real stuck answer: the same citation checklist, cycled forever.
+    fn stuck_trace(cycles: usize) -> String {
+        let cycle = "Need maybe mention 30B about 24GB at Q4 [2]. Good.\n\
+             Need maybe mention used RTX 3090 $800-1050 87% throughput [12]. Good.\n\
+             Need maybe mention Tesla P40 $300 caveats [20]. Good.\n\
+             Need maybe mention RTX 4090 $1500-2200 best-value NVIDIA [10]. Good.\n\
+             Need maybe mention single 24GB practical floor [17]. Good.\n\
+             Need maybe mention 2x used 3090 48GB running 70B [15]. Good.\n";
+        cycle.repeat(cycles)
+    }
+
+    #[test]
+    fn a_repeating_reasoning_trace_is_caught() {
+        let mut guard = LoopGuard::default();
+        // Streamed in small pieces, the way a provider actually sends them.
+        for piece in stuck_trace(20).as_bytes().chunks(7) {
+            let piece = std::str::from_utf8(piece).expect("ascii");
+            if let Some(line) = guard.feed(piece) {
+                assert!(
+                    line.starts_with("Need maybe mention 30B about 24GB"),
+                    "{line}"
+                );
+                return;
+            }
+        }
+        panic!("the loop ran 20 cycles without being caught");
+    }
+
+    #[test]
+    fn ordinary_reasoning_is_not_a_loop() {
+        let mut guard = LoopGuard::default();
+        let lines = [
+            "The user wants Traditional Chinese, so the answer must be in that script.",
+            "Source 2 says a 30B model is about 24GB at Q4, which fits one card.",
+            "Source 12 gives the used 3090 price and the throughput share.",
+            "A table reads better here than prose: price, VRAM, why it fits.",
+            "I should not cite a source I did not use, and not invent a reference number.",
+            "The close should say what is still unknown rather than recap the sections.",
+        ];
+        let text = lines.iter().flat_map(|l| [*l, "\n"]).collect::<String>();
+        for piece in text.as_bytes().chunks(11) {
+            let piece = std::str::from_utf8(piece).expect("ascii");
+            assert!(guard.feed(piece).is_none());
+        }
+        // Two copies of a long line, and any number of short ones, are not a stuck model.
+        let mut twice = LoopGuard::default();
+        let long = format!("{}\n{}\n", lines[0], lines[0]);
+        assert!(twice.feed(&long).is_none());
+        let mut bullets = LoopGuard::default();
+        for _ in 0..40 {
+            assert!(bullets.feed("- 24 GB\n").is_none());
+        }
+    }
+
+    #[test]
+    fn an_endless_single_line_hits_the_budget_instead() {
+        let mut guard = LoopGuard::default();
+        for _ in 0..4_000 {
+            if guard
+                .feed("thinking without any line break at all ")
+                .is_some()
+            {
+                return;
+            }
+        }
+        panic!("4000 chunks of one line stayed under the budget");
+    }
+
+    #[tokio::test]
+    async fn the_saved_thread_loses_the_cycles_not_the_thinking() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut text = String::new();
+        {
+            let mut mind = Mind {
+                tx: &tx,
+                text: &mut text,
+            };
+            mind.push("First I worked out the VRAM.\n");
+            mind.push(&stuck_trace(1));
+            mind.cut_loop("Need maybe mention 30B about 24GB at Q4 [2]. Good.");
+        }
+        assert_eq!(text, "First I worked out the VRAM.\n");
     }
 }

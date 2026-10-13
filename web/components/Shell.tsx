@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { InstanceProvider } from "@/components/instance";
+import Unlock from "@/components/Unlock";
 import { ShellContext, focusAsk, isTyping } from "@/components/shell-context";
 import { ThreadsProvider } from "@/components/threads";
 import { getPref, setPref } from "@/lib/prefs";
@@ -64,6 +65,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     <InstanceProvider>
       <ThreadsProvider>
         <Frame>{children}</Frame>
+        <Unlock />
       </ThreadsProvider>
     </InstanceProvider>
   );

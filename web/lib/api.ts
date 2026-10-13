@@ -97,9 +97,49 @@ export class ApiError extends Error {
   }
 }
 
+export const isUnauthorized = (e: unknown) => e instanceof ApiError && e.status === 401;
+
+/**
+ * Access token for a server started with LIBRA_AUTH_TOKEN. Typed once into the unlock
+ * screen, kept in this browser only, and sent as a bearer header on every /api call.
+ */
+const TOKEN_KEY = "libra:token";
+
+export function getToken(): string {
+  return typeof localStorage === "undefined" ? "" : localStorage.getItem(TOKEN_KEY) ?? "";
+}
+
+export function setToken(value: string) {
+  const v = value.trim();
+  if (v) localStorage.setItem(TOKEN_KEY, v);
+  else localStorage.removeItem(TOKEN_KEY);
+  setLocked(false);
+}
+
+let locked = false;
+export const isLocked = () => locked;
+
+/** The unlock screen listens for these two events. */
+function setLocked(v: boolean) {
+  if (locked === v || typeof window === "undefined") return;
+  locked = v;
+  window.dispatchEvent(new Event(v ? "libra:locked" : "libra:unlocked"));
+}
+
+/** Spread into a fetch init; leaves content-type alone so FormData still gets its boundary. */
+function withToken(init?: RequestInit): RequestInit {
+  const token = getToken();
+  if (!token) return init ?? {};
+  return {
+    ...init,
+    headers: { ...(init?.headers as Record<string, string>), authorization: `Bearer ${token}` },
+  };
+}
+
 export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init);
+  const res = await fetch(path, withToken(init));
   if (!res.ok) {
+    if (res.status === 401) setLocked(true);
     const body = await res.text().catch(() => "");
     let message = body;
     try {
@@ -109,6 +149,7 @@ export async function api<T = any>(path: string, init?: RequestInit): Promise<T>
     }
     throw new ApiError(message || `${res.status} ${res.statusText}`, res.status);
   }
+  setLocked(false);
   return res.status === 204 ? (undefined as T) : res.json();
 }
 
@@ -157,13 +198,15 @@ export async function uploadFiles(chatId: string, files: FileList | File[]) {
 
 /** POST /api/ask and hand back each SSE event as it arrives. */
 export async function ask(body: unknown, onEvent: (e: AskEvent) => void, signal?: AbortSignal) {
-  const res = await fetch("/api/ask", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const res = await fetch(
+    "/api/ask",
+    withToken({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }),
+  );
+  if (!res.ok) {
+    if (res.status === 401) setLocked(true);
+    throw new ApiError(res.status === 401 ? "a valid access token is required" : `${res.status} ${res.statusText}`, res.status);
+  }
+  setLocked(false);
   if (!res.body) throw new Error("no response body");
   const reader = res.body.getReader();
   const stopReading = () => {

@@ -1,16 +1,19 @@
-//! Answer widgets: calculator, time, weather, stocks. Ported from upstream `widgets/`.
+//! Answer widgets: calculator, currency, time, weather, stocks. Ported from upstream `widgets/`.
 
 mod calculator;
 mod clock;
+mod currency;
 pub mod stocks;
 pub mod weather;
 
 use crate::blocks::{Block, BlockType};
+use crate::cache::Cache;
 use crate::config::SettingsHandle;
 use calculator::eval;
 use reqwest::Client;
 
 pub use clock::{bind_clock, clock_facts, clock_place, pure_clock};
+pub use currency::facts as currency_facts;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -126,13 +129,15 @@ pub fn location_request(
 pub struct Registry {
     cfg: SettingsHandle,
     http: Client,
+    cache: Cache,
 }
 
 impl Registry {
-    pub fn new(http: &Client, cfg: SettingsHandle) -> Self {
+    pub fn new(http: &Client, cfg: SettingsHandle, cache: Cache) -> Self {
         Self {
             http: http.clone(),
             cfg,
+            cache,
         }
     }
 
@@ -158,7 +163,11 @@ impl Registry {
             }
             let input = w.input.trim().to_string();
             let block = match name.as_str() {
-                "calculator" => Self::calculator(&input, query),
+                "calculator" => match currency::block(&self.http, &self.cache, &input, query).await
+                {
+                    Some(b) => Some(b),
+                    None => Self::calculator(&input, query),
+                },
                 "time" => clock::render(&self.http, &input, here).await,
                 "weather" => {
                     let coords = here.and_then(Here::coords);

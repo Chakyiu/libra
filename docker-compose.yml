@@ -10,6 +10,8 @@ services:
       REDIS_URL: redis://redis:6379
       SEARXNG_API_URL: http://searxng:8080
       RUST_LOG: info
+      # The port below is published on the host. Set a token before exposing it anywhere real.
+      # LIBRA_AUTH_TOKEN: change-me
       # Model providers are added in Settings → Model providers, not here.
     volumes:
       - libra-data:/data

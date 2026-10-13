@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Health, ModelOptions, Settings, api } from "@/lib/api";
+import { Health, ModelOptions, Settings, api, isUnauthorized } from "@/lib/api";
 import { setPref, usePref } from "@/lib/prefs";
 
 type Instance = {
@@ -34,7 +34,8 @@ export function InstanceProvider({ children }: { children: React.ReactNode }) {
       api<Settings>("/api/settings"),
       api<ModelOptions>("/api/models"),
     ]);
-    setOnline(h.status === "fulfilled");
+    // A 401 means the server is up and locked, which is online as far as the banner goes.
+    setOnline(h.status === "fulfilled" || (h.reason != null && isUnauthorized(h.reason)));
     if (h.status === "fulfilled") setHealth(h.value);
     if (s.status === "fulfilled") setSettings(s.value);
     if (m.status === "fulfilled") setModels(m.value);
@@ -49,7 +50,7 @@ export function InstanceProvider({ children }: { children: React.ReactNode }) {
           setHealth(h);
           setOnline(true);
         })
-        .catch(() => setOnline(false));
+        .catch((e) => setOnline(isUnauthorized(e)));
     }, 60_000);
     return () => window.clearInterval(timer);
   }, [refresh]);

@@ -241,3 +241,46 @@
 
   .page__inner { padding: 24px 20px 56px; }
 }
+
+/* ---- locked instance: the token prompt over whatever is underneath ---- */
+.unlock {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in oklch, var(--bg) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.unlock__box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(380px, 100%);
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.unlock__box h2 {
+  margin: 0;
+  font: 600 19px/1.25 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.unlock__box p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.unlock__box code {
+  font: 500 12px/1 var(--font-mono);
+  color: var(--fg);
+}
+
+.unlock__foot { display: flex; justify-content: flex-end; }

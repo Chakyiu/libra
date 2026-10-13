@@ -99,6 +99,8 @@ export function startRun(opts: {
   fileIds: string[];
   model: string;
   depth: string;
+  /** "answer" | "discussion" — a long-form report written section by section */
+  mode: string;
   prior: Turn[];
   reload: () => void;
   settle: () => void;
@@ -174,6 +176,7 @@ export function startRun(opts: {
           query: question,
           ...(opts.model ? { model: opts.model, models: { answer: opts.model } } : {}),
           depth: opts.depth || "balance",
+          mode: opts.mode || "answer",
           message_history: history,
           files: opts.fileIds,
         },

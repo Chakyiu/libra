@@ -4,8 +4,9 @@ use crate::error::{LibraError, LibraResult};
 use crate::pipeline::{AskRequest, GeoFix};
 use crate::search::types::{SearchKind, SearchQuery};
 use crate::state::{App, Event};
-use axum::extract::{Multipart, Path, Query, State};
+use axum::extract::{Multipart, Path, Query, Request, State};
 use axum::http::StatusCode;
+use axum::http::header::{AUTHORIZATION, HeaderValue};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -13,6 +14,7 @@ use axum::{Json, Router};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::Digest as _;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -37,22 +39,80 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/discover", get(discover))
         .route("/generate/image", post(generate_image))
         .route("/stocks/{symbol}", get(stock_chart))
-        .with_state(app.clone());
+        .with_state(app.clone())
+        .layer(axum::middleware::from_fn_with_state(
+            app.clone(),
+            require_token,
+        ));
 
     // The Next.js build is a static export; serve it straight from the binary.
     let static_dir = app.settings.get().static_dir.clone();
     let index = std::path::Path::new(&static_dir).join("index.html");
     let fallback = ServeDir::new(&static_dir).fallback(ServeFile::new(index));
+    let origins = app.settings.get().allowed_origins.clone();
 
     Router::new()
         .nest("/api", api)
         .fallback_service(fallback)
-        .layer(
-            tower_http::cors::CorsLayer::new()
-                .allow_origin(tower_http::cors::Any)
-                .allow_methods(tower_http::cors::Any)
-                .allow_headers(tower_http::cors::Any),
-        )
+        .layer(cors_layer(&origins))
+}
+
+/// `LIBRA_AUTH_TOKEN` turns the API from "open on my LAN" into "needs the token".
+/// The static UI stays public — it is just an app shell; every route that reads or
+/// writes data lives under /api and is gated here.
+async fn require_token(
+    State(app): State<Arc<App>>,
+    req: Request,
+    next: axum::middleware::Next,
+) -> Result<Response, Response> {
+    let expected = app.settings.get().auth_token.clone();
+    if expected.is_empty() || token_matches(req.headers().get(AUTHORIZATION), &expected) {
+        return Ok(next.run(req).await);
+    }
+    Err((
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "error": { "code": "unauthorized", "message": "a valid access token is required" } })),
+    )
+        .into_response())
+}
+
+fn token_matches(header: Option<&HeaderValue>, expected: &str) -> bool {
+    let Some(raw) = header.and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let given = raw
+        .strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))
+        .unwrap_or(raw)
+        .trim();
+    // Both sides are hashed first so the compare cannot leak the token's length.
+    let (given, expected) = (
+        sha2::Sha256::digest(given.as_bytes()),
+        sha2::Sha256::digest(expected.as_bytes()),
+    );
+    given == expected
+}
+
+/// Same-origin by default. `LIBRA_ALLOWED_ORIGINS=*` restores the wide-open dev layer.
+fn cors_layer(origins: &[String]) -> tower_http::cors::CorsLayer {
+    use tower_http::cors::{AllowOrigin, Any};
+    if origins.iter().any(|o| o == "*") {
+        return tower_http::cors::CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+    }
+    let allowed: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|o| HeaderValue::from_str(o.trim()).ok())
+        .collect();
+    if allowed.is_empty() {
+        return tower_http::cors::CorsLayer::new();
+    }
+    tower_http::cors::CorsLayer::new()
+        .allow_origin(AllowOrigin::list(allowed))
+        .allow_methods(Any)
+        .allow_headers(Any)
 }
 
 async fn health(State(app): State<Arc<App>>) -> Json<Value> {
@@ -368,4 +428,23 @@ async fn generate_image(
     let cfg = app.settings.get();
     let v = crate::media::generate(&app.http, &cfg, &b.prompt).await?;
     Ok(Json(v))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn header(v: &str) -> HeaderValue {
+        HeaderValue::from_str(v).unwrap()
+    }
+
+    #[test]
+    fn a_bearer_token_is_required_to_match() {
+        assert!(token_matches(Some(&header("Bearer secret")), "secret"));
+        assert!(token_matches(Some(&header("bearer secret")), "secret"));
+        assert!(token_matches(Some(&header("secret")), "secret"));
+        assert!(!token_matches(Some(&header("Bearer wrong")), "secret"));
+        assert!(!token_matches(Some(&header("secret")), ""));
+        assert!(!token_matches(None, "secret"));
+    }
 }

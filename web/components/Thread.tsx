@@ -200,6 +200,7 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
         fileIds,
         model,
         depth: getPref("depth"),
+        mode: getPref("mode"),
         prior: turnsRef.current,
         reload,
         settle,

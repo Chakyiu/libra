@@ -75,6 +75,36 @@ function Calculation({ data }: { data: any }) {
   );
 }
 
+/** Rates are daily reference figures, so they carry more decimals than money does. */
+const fx = (v: number | null, max = 6) =>
+  v == null ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: max });
+
+function Currency({ data }: { data: any }) {
+  const from = String(data.from ?? "");
+  const to = String(data.to ?? "");
+  const rate = num(data.rate);
+  return (
+    <aside className="datum" aria-label={`${data.amount} ${from} in ${to}`}>
+      <p className="kicker">Currency</p>
+      <p className="datum__expr">
+        {fx(num(data.amount), 2)} {from}
+      </p>
+      <p className="datum__value">
+        = {fx(num(data.result), 2)} {to}
+      </p>
+      <div className="datum__row">
+        {rate != null && (
+          <span className="meta">
+            1 {from} = {fx(rate)} {to}
+          </span>
+        )}
+        {data.date && <span className="meta">{String(data.date).slice(0, 10)}</span>}
+        {data.source && <span className="meta">{data.source}</span>}
+      </div>
+    </aside>
+  );
+}
+
 function Time({ data }: { data: any }) {
   // "2026-10-12 11:57:03 +09:00"
   const [date, clock, offset] = String(data.time ?? "").split(" ");
@@ -117,6 +147,7 @@ export function Widget({ block }: { block: Block }) {
       return <Time data={d} />;
     case "widget":
       if (d.name === "calculator") return <Calculation data={d} />;
+      if (d.name === "currency") return <Currency data={d} />;
       if (d.name === "time") return <Time data={d} />;
       return block.message ? <p className="callout">{block.message}</p> : null;
     default:

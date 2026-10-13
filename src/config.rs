@@ -79,6 +79,14 @@ pub struct Config {
     pub request_timeout_secs: u64,
     pub search_cache_ttl_secs: u64,
     pub max_upload_mb: usize,
+
+    /// Bearer token every `/api` request must carry. Empty means the API is open — only
+    /// sensible on a trusted network or behind a proxy that authenticates. Env-only:
+    /// it is never read from settings.json and never returned by GET /api/settings.
+    pub auth_token: String,
+    /// Origins allowed to call the API from a browser. Empty = same-origin only,
+    /// which is what the single-binary deployment needs. `["*"]` is the dev escape hatch.
+    pub allowed_origins: Vec<String>,
 }
 
 /// Hot-swappable handle to the active config: a settings change swaps the Arc, and each
@@ -189,6 +197,13 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(25),
+            auth_token: std::env::var("LIBRA_AUTH_TOKEN")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            allowed_origins: split_list(
+                &std::env::var("LIBRA_ALLOWED_ORIGINS").unwrap_or_default(),
+            ),
         }
     }
 
@@ -514,5 +529,20 @@ mod tests {
             cfg.search_order_web,
             vec!["brave".to_string(), "searxng".to_string()]
         );
+    }
+
+    #[test]
+    fn the_access_token_stays_out_of_the_settings_api() {
+        let mut cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
+        cfg.auth_token = "s3cret".into();
+        cfg.apply_settings(&serde_json::json!({
+            "authToken": "x",
+            "auth_token": "y",
+            "allowedOrigins": ["*"]
+        }));
+        let json = cfg.settings_json();
+        assert_eq!(cfg.auth_token, "s3cret");
+        assert!(json.get("authToken").is_none(), "{json}");
+        assert!(json.get("auth_token").is_none(), "{json}");
     }
 }

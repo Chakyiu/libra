@@ -44,7 +44,7 @@ const ORDER: { kind: "web" | "news" | "images" | "videos"; label: string }[] = [
 ];
 
 const WIDGETS = [
-  { id: "calculator", label: "Calculator", help: "Works out arithmetic in the question and shows it above the answer." },
+  { id: "calculator", label: "Calculator", help: "Works out arithmetic and currency conversions in the question and shows them above the answer." },
   { id: "time", label: "Time", help: "The current time in a city or timezone." },
   { id: "weather", label: "Weather", help: "Current conditions and a five-day forecast from Open-Meteo. No key needed." },
   { id: "stocks", label: "Stocks", help: "Quote, session chart, and key stats for a US-listed company or ticker. No key needed." },

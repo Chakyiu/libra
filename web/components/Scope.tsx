@@ -111,6 +111,7 @@ export default function Scope({ files, selected, onSelect, onAttach, uploading, 
   const { models } = useInstance();
   const [model, setModel] = useAnswerModel();
   const depth = usePref("depth");
+  const mode = usePref("mode");
   const toggle = (id: string) => onSelect(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
 
   return (
@@ -180,6 +181,24 @@ export default function Scope({ files, selected, onSelect, onAttach, uploading, 
             <option value="fast">Fast search</option>
             <option value="balance">Balance search</option>
             <option value="deep">Deep search</option>
+          </select>
+          <ChevronDownIcon />
+        </label>
+        <label
+          className="chip chip--select"
+          title="A short answer leads with the result and stops. A discussion report plans 4–6 sections from the same research and writes them one after another — longer to read, slower to write, still cited."
+        >
+          <span className="sr-only">Answer length</span>
+          <select
+            value={mode}
+            disabled={disabled}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "answer" || v === "discussion") setPref("mode", v);
+            }}
+          >
+            <option value="answer">Short answer</option>
+            <option value="discussion">Discussion report</option>
           </select>
           <ChevronDownIcon />
         </label>

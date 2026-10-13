@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { api } from "@/lib/api";
 
 type Bar = { t: number; p: number; v?: number | null };
 
@@ -384,8 +385,9 @@ export function StockQuote({ data }: { data: any }) {
     let gone = false;
     const ctrl = new AbortController();
     setLoading(true);
-    fetch(`/api/stocks/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}`, { signal: ctrl.signal })
-      .then((r) => (r.ok ? r.json() : null))
+    api(`/api/stocks/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}`, {
+      signal: ctrl.signal,
+    })
       .then((body) => {
         if (gone) return;
         const points = barsOf(body?.points);
