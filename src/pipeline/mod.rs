@@ -133,11 +133,11 @@ impl Mind<'_> {
 }
 
 /// A reasoning model can fall into a repetition loop inside its thinking — the same
-/// `Need mention X [12]. Good.` line forever — and spend the whole context window before it
-/// writes a word of the answer. The answer call has no token cap (a long answer must not be
-/// cut off), so the loop has to be recognised rather than bounded. Watched on the reasoning
-/// trace only: an answer legitimately repeats short lines (table rules), thinking does not
-/// repeat long ones.
+/// `Need mention X [12]. Good.` line forever, or that line with only the ending swapped —
+/// and spend the whole context window before it writes a word of the answer. The answer
+/// call has no token cap (a long answer must not be cut off), so the loop has to be
+/// recognised rather than bounded. Watched on the reasoning trace only: an answer
+/// legitimately repeats short lines (table rules), thinking does not repeat long ones.
 pub struct LoopGuard {
     /// the last `WINDOW` non-trivial thought lines, oldest first
     lines: std::collections::VecDeque<String>,
@@ -150,6 +150,10 @@ pub struct LoopGuard {
 const BUDGET: usize = 40_000;
 const WINDOW: usize = 60;
 const SHORTEST: usize = 24;
+/// Shared opening of a checklist the model is rewriting instead of finishing.
+const STEM: usize = 18;
+/// How many times that opening may show up in the window before it is a loop.
+const STEM_HITS: usize = 8;
 
 /// What the user sees when the model loops. An empty answer with no provider error is
 /// otherwise indistinguishable from a model that simply had nothing to say.
@@ -196,8 +200,23 @@ impl LoopGuard {
         if self.lines.len() > WINDOW {
             self.lines.pop_front();
         }
-        again.then_some(line)
+        if again {
+            return Some(line);
+        }
+        // Same opening, different ending: "Need maybe include … `opt1`" then `opt2`, forever.
+        // The line is never identical, so the check above never sees it.
+        let stem = stem_of(&line);
+        let hits = self.lines.iter().filter(|l| stem_of(l) == stem).count();
+        if hits >= STEM_HITS {
+            return self.lines.iter().find(|l| stem_of(l) == stem).cloned();
+        }
+        None
     }
+}
+
+/// The opening of a thought line, lowercased, so a rewritten checklist item compares equal.
+fn stem_of(line: &str) -> String {
+    line.chars().take(STEM).collect::<String>().to_lowercase()
 }
 
 fn store_thought(blocks: &mut Vec<Block>, thought: &str) {
@@ -2806,6 +2825,28 @@ mod tests {
         panic!("the loop ran 20 cycles without being caught");
     }
 
+    /// The trace from a stuck answer that never repeats a whole line: one checklist
+    /// item, with a different ending every time. Exact equality does not see it.
+    #[test]
+    fn a_rewritten_checklist_is_a_loop() {
+        let mut guard = LoopGuard::default();
+        let mut caught = None;
+        for i in 0..20 {
+            let line =
+                format!("Need maybe include if using `Raspberry Pi` `dhcpcd` `item{i}`? no.\n");
+            if let Some(hit) = guard.feed(&line) {
+                caught = Some((i, hit));
+                break;
+            }
+        }
+        let (at, hit) = caught.expect("the rewritten checklist was not caught");
+        assert_eq!(at, STEM_HITS - 1, "caught too early, at line {at}");
+        assert!(
+            hit.starts_with("Need maybe include if using `Raspberry Pi` `dhcpcd` `item0`"),
+            "{hit}"
+        );
+    }
+
     #[test]
     fn ordinary_reasoning_is_not_a_loop() {
         let mut guard = LoopGuard::default();
@@ -2829,6 +2870,12 @@ mod tests {
         let mut bullets = LoopGuard::default();
         for _ in 0..40 {
             assert!(bullets.feed("- 24 GB\n").is_none());
+        }
+        // A short run of similar notes is still thinking. One more, and it is the checklist.
+        let mut almost = LoopGuard::default();
+        for i in 0..(STEM_HITS - 1) {
+            let line = format!("Could be the lease expiring on attempt number {i} tonight.\n");
+            assert!(almost.feed(&line).is_none(), "line {i}");
         }
     }
 
