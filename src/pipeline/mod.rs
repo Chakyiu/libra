@@ -134,11 +134,11 @@ impl Mind<'_> {
 
 /// A reasoning model can fall into a repetition loop inside its thinking — the same
 /// `Need mention X [12]. Good.` line forever, or that whole claim with only a tail swapped —
-/// and spend the whole context window before it writes a word of the answer. The answer
-/// call has no token cap (a long answer must not be cut off), so a real loop has to be
-/// recognised rather than bounded. A long trace that keeps adding new claims is not a
-/// loop. Watched on the reasoning trace only: an answer legitimately repeats short lines
-/// (table rules), thinking does not repeat long ones.
+/// and spend the whole context window before it writes a word of the answer. A long trace
+/// that keeps adding new claims is not a loop; the answer call leaves room for those notes
+/// to become the answer. A real loop is cut here, by a repeated line. Watched on the
+/// reasoning trace only: an answer legitimately repeats short lines (table rules), thinking
+/// does not repeat long ones.
 pub struct LoopGuard {
     /// the last `WINDOW` non-trivial thought lines, oldest first
     lines: std::collections::VecDeque<String>,
@@ -147,8 +147,9 @@ pub struct LoopGuard {
     chars: usize,
 }
 
-/// How much thinking is pathological whatever it says: roughly 10k tokens.
-const BUDGET: usize = 40_000;
+/// How much thinking is pathological whatever it says. Above the answer token cap,
+/// so a long trace that is still moving is ended by the provider, not mistaken for a loop.
+const BUDGET: usize = 80_000;
 const WINDOW: usize = 60;
 const SHORTEST: usize = 24;
 /// How much of a line must be identical before two thoughts are the same claim.
@@ -157,6 +158,10 @@ const SHORTEST: usize = 24;
 const STEM: usize = 48;
 /// How many times that claim may show up in the window before it is a loop.
 const STEM_HITS: usize = 8;
+
+/// Room for the notes and the answer. A local server's own short default stops the
+/// trace mid-sentence, while the answer is still only in the notes.
+const ANSWER_TOKENS: u32 = 16_384;
 
 /// What the user sees when the model loops. An empty answer with no provider error is
 /// otherwise indistinguishable from a model that simply had nothing to say.
@@ -1179,7 +1184,7 @@ impl Pipeline {
                         .chain(std::iter::once(msg("user", user)))
                         .collect(),
                     temperature,
-                    max_tokens: None,
+                    max_tokens: Some(ANSWER_TOKENS),
                     json_mode: false,
                 };
                 if let Err(e) = self
@@ -1219,7 +1224,7 @@ impl Pipeline {
                     .chain(std::iter::once(ask))
                     .collect(),
                 temperature,
-                max_tokens: None,
+                max_tokens: Some(ANSWER_TOKENS),
                 json_mode: false,
             };
             if let Err(e) = self
@@ -2886,9 +2891,8 @@ mod tests {
         // Many different claims that only share a short opening are still thinking.
         let mut checklist = LoopGuard::default();
         for i in 0..40 {
-            let line = format!(
-                "Need maybe mention source {i} adds a fact the earlier lines did not.\n"
-            );
+            let line =
+                format!("Need maybe mention source {i} adds a fact the earlier lines did not.\n");
             assert!(checklist.feed(&line).is_none(), "{line}");
         }
     }
@@ -2898,7 +2902,10 @@ mod tests {
         let mut guard = LoopGuard::default();
         for _ in 0..4_000 {
             if let Some(hit) = guard.feed("thinking without any line break at all ") {
-                assert!(hit.is_empty(), "a long line with no repeat is the budget, not a loop");
+                assert!(
+                    hit.is_empty(),
+                    "a long line with no repeat is the budget, not a loop"
+                );
                 return;
             }
         }
