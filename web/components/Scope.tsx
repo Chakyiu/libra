@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { DragEvent } from "react";
+import type { ClipboardEvent, DragEvent } from "react";
 import { ChevronDownIcon, ClipIcon } from "@/components/icons";
 import { useAnswerModel, useInstance } from "@/components/instance";
 import { useThreads } from "@/components/threads";
@@ -97,6 +97,64 @@ export function useFileDrop(onDropFiles: (files: File[]) => void, disabled: bool
   return { over, onDragEnter, onDragOver, onDragLeave, onDrop };
 }
 
+/** A screenshot paste has no real filename. `image.png` is the name the browser invents. */
+const GENERIC_PASTE_NAME = /^(image\.(png|jpe?g|gif|webp|bmp)|blob)$/i;
+
+const PASTE_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+};
+
+function clipboardImages(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const fromItems: File[] = [];
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== "file") continue;
+    if (item.type && !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file && file.size > 0 && isImageFile(file)) fromItems.push(file);
+  }
+  if (fromItems.length) return fromItems;
+  return Array.from(data.files ?? []).filter((f) => isImageFile(f) && f.size > 0);
+}
+
+let pasted = 0;
+
+function namedPaste(file: File, total: number): File {
+  if (file.name && !GENERIC_PASTE_NAME.test(file.name)) return file;
+  const ext = PASTE_EXT[file.type] || "png";
+  const n = ++pasted;
+  const label = n === 1 && total === 1 ? "" : ` ${n}`;
+  return new File([file], `Pasted image${label}.${ext}`, {
+    type: file.type || "image/png",
+    lastModified: file.lastModified,
+  });
+}
+
+/**
+ * Attach images from a paste. Words still land in the box.
+ * A screenshot has no text, so that paste is cancelled — otherwise some browsers
+ * drop the invented filename into the question.
+ */
+export function onPasteImages(
+  e: ClipboardEvent<HTMLTextAreaElement>,
+  onAttach: (files: File[]) => void,
+  disabled: boolean,
+) {
+  const data = e.clipboardData;
+  if (!data) return;
+  // Read the text first. Some browsers clear it once the image item is taken.
+  const text = data.getData("text/plain").trim();
+  const raw = clipboardImages(data);
+  if (!raw.length) return;
+  if (!text || raw.some((f) => f.name === text)) e.preventDefault();
+  if (!disabled) onAttach(raw.map((file) => namedPaste(file, raw.length)));
+}
+
 type ScopeProps = {
   files: FileRef[];
   selected: string[];
@@ -147,7 +205,7 @@ export default function Scope({ files, selected, onSelect, onAttach, uploading, 
           className="chip chip--action"
           onClick={() => input.current?.click()}
           disabled={disabled || uploading}
-          title="Attach a text file, PDF, Word document, or image. You can also drop it on the box."
+          title="Attach a text file, PDF, Word document, or image. You can also drop it on the box or paste an image into it."
         >
           <ClipIcon />
           {uploading ? "Reading…" : "Attach"}

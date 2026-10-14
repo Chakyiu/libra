@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Scope, { useAttachments, useFileDrop } from "@/components/Scope";
+import Scope, { onPasteImages, useAttachments, useFileDrop } from "@/components/Scope";
 import Topbar, { VERSION, useHost } from "@/components/Topbar";
 import { ArrowIcon, Mark } from "@/components/icons";
 import { useInstance } from "@/components/instance";
@@ -105,6 +105,7 @@ export default function Home() {
                       ask(text);
                     }
                   }}
+                  onPaste={(e) => onPasteImages(e, att.attach, att.uploading)}
                   placeholder="Ask anything the web or your files can answer…"
                   aria-label="Your question"
                 />

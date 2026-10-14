@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Scope, { useAttachments, useFileDrop } from "@/components/Scope";
+import Scope, { onPasteImages, useAttachments, useFileDrop } from "@/components/Scope";
 import { KindFilter, SheetState, SourcesPanel, SourcesSheet } from "@/components/Sources";
 import Topbar from "@/components/Topbar";
 import TurnView from "@/components/Turn";
@@ -107,6 +107,7 @@ function Composer({
                 submit();
               }
             }}
+            onPaste={(e) => onPasteImages(e, att.attach, !!closed || att.uploading)}
             disabled={closed}
             placeholder={
               phone
