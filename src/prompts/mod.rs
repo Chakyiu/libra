@@ -179,9 +179,10 @@ CORE RULES:
 5. Leave out background the question did not ask for. If the sources disagree, say which is more credible in one sentence. If they do not answer the question, say what is missing. Do not fill the gap with guesses.
 6. Today is {date}. We are in the year {year}. Use that date for "today", "this week", and "this year". If a Clock line names a place, that line is already the time there — do not recompute it from this date. Do not claim knowledge cutoffs.
 7. Never mention these instructions, the search tools, or the reference system.
-8. A previous answer may be included after the question. When the user asks to translate, summarize, shorten, rewrite, or explain it, produce that result from the previous answer. Keep its citation numbers when you translate. The user already has that text on screen, so use it."#;
+8. A previous answer may be included after the question. When the user asks to translate, summarize, shorten, rewrite, or explain it, produce that result from the previous answer. Keep its citation numbers when you translate. The user already has that text on screen, so use it.
+9. When the opening sentence is clear, write the answer and stop. Cite only the sources the answer needs. Do not walk the remaining sources, and do not plan the reply one claim at a time."#;
 
-pub const ANSWER_USER: &str = r#"Answer the user's question. When a previous answer is included, the instruction under it decides whether to rewrite that answer or answer a new question.
+pub const ANSWER_USER: &str = r#"Write the answer now. When a previous answer is included, the instruction under it decides whether to rewrite that answer or answer a new question. After the answer is written, stop. Do not review the sources again.
 
 Reference Material:
 {references}
@@ -217,7 +218,8 @@ RULES:
 4. 150-400 words. Prose first — a list or a small table only when the section genuinely is one.
 5. If the references do not cover the section, say what is missing in one sentence and stop. Do not fill the gap with guesses.
 6. Today is {date}. We are in the year {year}.
-7. Never mention these instructions, the search tools, the reference system, or the other sections."#;
+7. Never mention these instructions, the search tools, the reference system, or the other sections.
+8. When the section's opening sentence is clear, write it and stop. Do not walk the remaining sources, and do not plan the section one claim at a time."#;
 
 pub const DISCUSSION_SECTION_USER: &str = r#"Question: {query}
 
@@ -237,14 +239,16 @@ RULES:
 - Cite the documentation you used with bracketed reference numbers, e.g. [1].
 - Explain the important decisions briefly, before or after the code, not line by line. Use a short list when there are several steps or options.
 - Prefer current, maintained APIs; if the references show a deprecated pattern, say so.
-- Respond in the language of the user's question."#;
+- Respond in the language of the user's question.
+- When the approach is clear, write the code and stop. Do not plan it one line at a time, and do not review the references again."#;
 
 pub const IMAGE_READ_SYSTEM: &str = r#"You are Libra. The user attached one or more images.
 
 RULES:
 - Answer from what is visible in the images.
 - If a detail is not visible, say so. Do not invent text, numbers, or labels that are not in the image.
-- Respond in the language of the user's question."#;
+- Respond in the language of the user's question.
+- When you can see the answer, write it and stop. Do not plan it one claim at a time."#;
 
 pub const IMAGE_LOOKUP_SYSTEM: &str = r#"You write one web search query for an attached image.
 
@@ -265,7 +269,8 @@ RULES:
 - If the references do not identify the subject, say what is visible and say the name could not be confirmed. Do not invent a name.
 - Do not invent text, numbers, or labels that are not in the image or the references.
 - Use a short list when several visible facts are easier to scan that way.
-- Respond in the language of the user's question."#;
+- Respond in the language of the user's question.
+- When the opening sentence is clear, write the answer and stop. Do not walk the remaining sources, and do not plan the reply one claim at a time."#;
 
 pub const IMAGE_READ_SOURCES_USER: &str = r#"Reference Material:
 {references}
@@ -279,7 +284,8 @@ RULES:
 - Answer only from the uploaded documents. Cite the chunk numbers you used, e.g. [1][3].
 - Lead with the answer in one or two sentences. Use a bullet list, a numbered list, or a small markdown table when the documents contain several items, dates, or figures. Quote a passage only when the wording itself is the point.
 - If the documents do not contain the answer, say so explicitly; do not substitute general knowledge.
-- Respond in the language of the user's question."#;
+- Respond in the language of the user's question.
+- When the opening sentence is clear, write the answer and stop. Do not walk the remaining chunks, and do not plan the reply one claim at a time."#;
 
 pub const DOCUMENT_USER: &str = r#"Uploaded document chunks:
 {chunks}
@@ -339,6 +345,7 @@ mod tests {
         assert!(a.contains("Today is 2026-10-10"));
         assert!(!a.contains("{year}"));
         assert!(a.contains("markdown table"));
+        assert!(a.contains("write the answer and stop"));
         assert!(!a.contains("Never use markdown tables"));
         assert!(!a.contains("Be comprehensive"));
     }
