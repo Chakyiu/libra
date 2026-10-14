@@ -164,6 +164,7 @@ pub async fn call(
         temperature: Some(0.0),
         max_tokens,
         json_mode,
+        no_think: false,
     };
     let resp = http
         .post(url(base, key, model, "generateContent"))

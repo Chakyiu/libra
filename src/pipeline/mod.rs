@@ -228,6 +228,15 @@ fn stem_of(line: &str) -> String {
     line.chars().take(STEM).collect::<String>().to_lowercase()
 }
 
+/// The end of a trace, where the drafted reply usually sits.
+fn notes_tail(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    text.chars().skip(count - max_chars).collect()
+}
+
 fn store_thought(blocks: &mut Vec<Block>, thought: &str) {
     if thought.trim().is_empty() {
         return;
@@ -1186,6 +1195,7 @@ impl Pipeline {
                     temperature,
                     max_tokens: Some(ANSWER_TOKENS),
                     json_mode: false,
+                    no_think: false,
                 };
                 if let Err(e) = self
                     .stream_into(
@@ -1196,6 +1206,7 @@ impl Pipeline {
                         &mut mind,
                         &mut answer,
                         &tx,
+                        true,
                     )
                     .await
                 {
@@ -1226,6 +1237,7 @@ impl Pipeline {
                 temperature,
                 max_tokens: Some(ANSWER_TOKENS),
                 json_mode: false,
+                no_think: false,
             };
             if let Err(e) = self
                 .stream_into(
@@ -1236,6 +1248,7 @@ impl Pipeline {
                     &mut mind,
                     &mut answer,
                     &tx,
+                    true,
                 )
                 .await
             {
@@ -1354,6 +1367,9 @@ impl Pipeline {
     /// Stream one completion into `answer`, checkpointing as it goes. `Err` only when the
     /// model failed before writing anything: a failure part way through keeps the text that
     /// arrived, and a stop is not an error.
+    ///
+    /// `allow_notes` permits one retry when the trace held the answer and the reply was empty.
+    /// The retry passes `false`, so it cannot retry again.
     async fn stream_into(
         &self,
         llm: &Llm,
@@ -1363,7 +1379,14 @@ impl Pipeline {
         mind: &mut Mind<'_>,
         answer: &mut String,
         tx: &UnboundedSender<Event>,
+        allow_notes: bool,
     ) -> Result<(), String> {
+        let system = request
+            .messages
+            .iter()
+            .find(|m| m.role == "system")
+            .map(|m| m.content.clone());
+        let temperature = request.temperature;
         let mut rx = match llm.stream(request).await {
             Ok(rx) => rx,
             Err(e) => return Err(format!("answer model failed: {e}")),
@@ -1438,22 +1461,93 @@ impl Pipeline {
                 mind.cut_loop(&line);
             }
             store_thought(blocks, mind.text);
-            return if body {
-                Ok(())
-            } else if line.is_empty() {
-                Err(BUDGET_USED.to_string())
-            } else {
-                Err(LOOPING.to_string())
-            };
+            if body {
+                return Ok(());
+            }
+            if !line.is_empty() {
+                return Err(LOOPING.to_string());
+            }
+            return self
+                .reply_from_notes(
+                    llm,
+                    system,
+                    temperature,
+                    turn,
+                    blocks,
+                    mind,
+                    answer,
+                    tx,
+                    allow_notes,
+                    BUDGET_USED,
+                )
+                .await;
         }
         if !body && !turn.cancel.load(Ordering::Acquire) {
-            return Err(if truncated {
-                BUDGET_USED.to_string()
-            } else {
-                NO_TEXT.to_string()
-            });
+            return self
+                .reply_from_notes(
+                    llm,
+                    system,
+                    temperature,
+                    turn,
+                    blocks,
+                    mind,
+                    answer,
+                    tx,
+                    allow_notes,
+                    if truncated { BUDGET_USED } else { NO_TEXT },
+                )
+                .await;
         }
         Ok(())
+    }
+
+    /// The notes already contain the answer and the reply channel was empty. One more
+    /// call, with reasoning off, writes that reply. A real repetition loop is not retried.
+    async fn reply_from_notes(
+        &self,
+        llm: &Llm,
+        system: Option<String>,
+        temperature: Option<f32>,
+        turn: &LiveTurn,
+        blocks: &mut Vec<Block>,
+        mind: &mut Mind<'_>,
+        answer: &mut String,
+        tx: &UnboundedSender<Event>,
+        allow_notes: bool,
+        fallback: &str,
+    ) -> Result<(), String> {
+        if !allow_notes || mind.text.trim().is_empty() || turn.cancel.load(Ordering::Acquire) {
+            return Err(fallback.to_string());
+        }
+        let notes = notes_tail(mind.text, 8_000);
+        let mut messages = Vec::new();
+        if let Some(system) = system {
+            messages.push(msg("system", system));
+        }
+        messages.push(msg(
+            "user",
+            format!(
+                "Write the reply the user will read. They have not seen these notes. Do not plan again.\n\nNotes:\n{notes}"
+            ),
+        ));
+        tracing::info!(model = %llm.model, "answer was only in the notes; writing the reply");
+        Box::pin(self.stream_into(
+            llm,
+            ChatRequest {
+                messages,
+                temperature,
+                max_tokens: Some(4_096),
+                json_mode: false,
+                no_think: true,
+            },
+            turn,
+            blocks,
+            mind,
+            answer,
+            tx,
+            false,
+        ))
+        .await
     }
 
     /// The section list for a long-form report. Fewer than three sections is not a report,
@@ -1631,6 +1725,7 @@ impl Pipeline {
                 temperature: Some(0.0),
                 max_tokens: Some(1024),
                 json_mode: false,
+                no_think: false,
             })
             .await
             .ok()?;
@@ -2516,6 +2611,13 @@ mod tests {
             url: url.into(),
             ..SearchResult::default()
         }
+    }
+
+    #[test]
+    fn notes_tail_keeps_the_end_of_a_trace() {
+        assert_eq!(notes_tail("abcdef", 10), "abcdef");
+        assert_eq!(notes_tail("abcdef", 3), "def");
+        assert_eq!(notes_tail("答案在最後", 2), "最後");
     }
 
     #[test]

@@ -17,6 +17,8 @@ fn build_body(model: &str, req: &ChatRequest, stream: bool) -> Value {
         body["response_format"] = json!({ "type": "json_object" });
         // Reasoning models spend max_tokens on the trace. The JSON is then cut off
         // with finish_reason=length. These calls only need the object.
+    }
+    if req.json_mode || req.no_think {
         body["chat_template_kwargs"] = json!({ "enable_thinking": false });
         body["reasoning"] = json!({ "effort": "none" });
     }
@@ -228,6 +230,7 @@ pub async fn call(
         temperature: Some(0.0),
         max_tokens,
         json_mode,
+        no_think: false,
     };
     let mut body = build_body(model, &req, false);
     let resp = request(http, base, key, "chat/completions", &body)

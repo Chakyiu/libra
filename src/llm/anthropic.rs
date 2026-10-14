@@ -150,6 +150,7 @@ pub async fn call(
         temperature: Some(0.0),
         max_tokens,
         json_mode: false,
+        no_think: false,
     };
     let resp = request(http, base, key, &build_body(model, &req, false))
         .send()

@@ -87,6 +87,8 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub json_mode: bool,
+    /// Ask the server not to spend the completion on a reasoning trace.
+    pub no_think: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -233,6 +235,7 @@ impl Llm {
             temperature: Some(0.0),
             max_tokens,
             json_mode: true,
+            no_think: false,
         };
         let system_prompt =
             format!("{system}\n\nReturn ONLY raw JSON. No markdown fences, no commentary.");
@@ -330,6 +333,7 @@ impl Llm {
                 temperature: Some(0.0),
                 max_tokens: Some(max_tokens),
                 json_mode: true,
+                no_think: false,
             })
             .await?;
         let mut content = String::new();
