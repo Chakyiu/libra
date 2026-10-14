@@ -133,11 +133,12 @@ impl Mind<'_> {
 }
 
 /// A reasoning model can fall into a repetition loop inside its thinking — the same
-/// `Need mention X [12]. Good.` line forever, or that line with only the ending swapped —
+/// `Need mention X [12]. Good.` line forever, or that whole claim with only a tail swapped —
 /// and spend the whole context window before it writes a word of the answer. The answer
-/// call has no token cap (a long answer must not be cut off), so the loop has to be
-/// recognised rather than bounded. Watched on the reasoning trace only: an answer
-/// legitimately repeats short lines (table rules), thinking does not repeat long ones.
+/// call has no token cap (a long answer must not be cut off), so a real loop has to be
+/// recognised rather than bounded. A long trace that keeps adding new claims is not a
+/// loop. Watched on the reasoning trace only: an answer legitimately repeats short lines
+/// (table rules), thinking does not repeat long ones.
 pub struct LoopGuard {
     /// the last `WINDOW` non-trivial thought lines, oldest first
     lines: std::collections::VecDeque<String>,
@@ -150,9 +151,11 @@ pub struct LoopGuard {
 const BUDGET: usize = 40_000;
 const WINDOW: usize = 60;
 const SHORTEST: usize = 24;
-/// Shared opening of a checklist the model is rewriting instead of finishing.
-const STEM: usize = 18;
-/// How many times that opening may show up in the window before it is a loop.
+/// How much of a line must be identical before two thoughts are the same claim.
+/// Eighteen characters is just how a trace starts a new point ("Need maybe mention"),
+/// so a shorter stem treats a long, still-moving trace as a loop.
+const STEM: usize = 48;
+/// How many times that claim may show up in the window before it is a loop.
 const STEM_HITS: usize = 8;
 
 /// What the user sees when the model loops. An empty answer with no provider error is
@@ -173,6 +176,7 @@ impl Default for LoopGuard {
 
 impl LoopGuard {
     /// The line whose repetition ended the trace, when the trace has looped.
+    /// `Some("")` is the character budget: the trace is long, and nothing repeated.
     pub fn feed(&mut self, chunk: &str) -> Option<String> {
         self.chars += chunk.chars().count();
         if self.chars > BUDGET {
@@ -203,8 +207,8 @@ impl LoopGuard {
         if again {
             return Some(line);
         }
-        // Same opening, different ending: "Need maybe include … `opt1`" then `opt2`, forever.
-        // The line is never identical, so the check above never sees it.
+        // The same claim with a different tail: a citation or a number moved, the sentence
+        // did not. A shared short opening is a new point, so it does not count.
         let stem = stem_of(&line);
         let hits = self.lines.iter().filter(|l| stem_of(l) == stem).count();
         if hits >= STEM_HITS {
@@ -1415,16 +1419,24 @@ impl Pipeline {
         turn.cancel.clear_stream();
         drop(rx);
         if let Some(line) = looped {
-            tracing::warn!(
-                model = %llm.model,
-                line = %line,
-                "reasoning loop: the model repeated itself instead of answering"
-            );
+            if line.is_empty() {
+                tracing::warn!(model = %llm.model, "reasoning used the character budget and wrote no answer");
+            } else {
+                tracing::warn!(
+                    model = %llm.model,
+                    line = %line,
+                    "reasoning loop: the model repeated itself instead of answering"
+                );
+            }
             // Keep the thinking that came before the loop, drop the cycles after it.
-            mind.cut_loop(&line);
+            if !line.is_empty() {
+                mind.cut_loop(&line);
+            }
             store_thought(blocks, mind.text);
             return if body {
                 Ok(())
+            } else if line.is_empty() {
+                Err(BUDGET_USED.to_string())
             } else {
                 Err(LOOPING.to_string())
             };
@@ -2871,11 +2883,13 @@ mod tests {
         for _ in 0..40 {
             assert!(bullets.feed("- 24 GB\n").is_none());
         }
-        // A short run of similar notes is still thinking. One more, and it is the checklist.
-        let mut almost = LoopGuard::default();
-        for i in 0..(STEM_HITS - 1) {
-            let line = format!("Could be the lease expiring on attempt number {i} tonight.\n");
-            assert!(almost.feed(&line).is_none(), "line {i}");
+        // Many different claims that only share a short opening are still thinking.
+        let mut checklist = LoopGuard::default();
+        for i in 0..40 {
+            let line = format!(
+                "Need maybe mention source {i} adds a fact the earlier lines did not.\n"
+            );
+            assert!(checklist.feed(&line).is_none(), "{line}");
         }
     }
 
@@ -2883,10 +2897,8 @@ mod tests {
     fn an_endless_single_line_hits_the_budget_instead() {
         let mut guard = LoopGuard::default();
         for _ in 0..4_000 {
-            if guard
-                .feed("thinking without any line break at all ")
-                .is_some()
-            {
+            if let Some(hit) = guard.feed("thinking without any line break at all ") {
+                assert!(hit.is_empty(), "a long line with no repeat is the budget, not a loop");
                 return;
             }
         }
