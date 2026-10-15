@@ -147,9 +147,10 @@ pub struct LoopGuard {
     chars: usize,
 }
 
-/// How much thinking is pathological whatever it says. Above the answer token cap,
-/// so a long trace that is still moving is ended by the provider, not mistaken for a loop.
-const BUDGET: usize = 80_000;
+/// How much thinking is pathological whatever it says. Well above the answer token cap,
+/// so a long trace that is still moving is ended by the provider, not mistaken for a loop
+/// or for a model that never answered.
+const BUDGET: usize = 400_000;
 const WINDOW: usize = 60;
 const SHORTEST: usize = 24;
 /// How much of a line must be identical before two thoughts are the same claim.
@@ -159,9 +160,9 @@ const STEM: usize = 48;
 /// How many times that claim may show up in the window before it is a loop.
 const STEM_HITS: usize = 8;
 
-/// Room for the notes and the answer. A local server's own short default stops the
-/// trace mid-sentence, while the answer is still only in the notes.
-const ANSWER_TOKENS: u32 = 16_384;
+/// Room for a long reasoning trace and the answer after it. A smaller cap stops the
+/// trace mid-sentence and the empty reply is reported as if the model never answered.
+const ANSWER_TOKENS: u32 = 65_536;
 
 /// What the user sees when the model loops. An empty answer with no provider error is
 /// otherwise indistinguishable from a model that simply had nothing to say.
@@ -1536,7 +1537,7 @@ impl Pipeline {
             ChatRequest {
                 messages,
                 temperature,
-                max_tokens: Some(4_096),
+                max_tokens: Some(ANSWER_TOKENS),
                 json_mode: false,
                 no_think: true,
             },
@@ -3002,7 +3003,7 @@ mod tests {
     #[test]
     fn an_endless_single_line_hits_the_budget_instead() {
         let mut guard = LoopGuard::default();
-        for _ in 0..4_000 {
+        for _ in 0..16_000 {
             if let Some(hit) = guard.feed("thinking without any line break at all ") {
                 assert!(
                     hit.is_empty(),
@@ -3011,7 +3012,7 @@ mod tests {
                 return;
             }
         }
-        panic!("4000 chunks of one line stayed under the budget");
+        panic!("16000 chunks of one line stayed under the budget");
     }
 
     #[tokio::test]
