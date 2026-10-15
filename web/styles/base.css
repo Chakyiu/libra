@@ -9,9 +9,12 @@
   --border:  oklch(90% 0.006 95);
   --accent:  oklch(52% 0.10 28);
 
-  --font-display: 'Iowan Old Style', 'Charter', Georgia, serif;
-  --font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-mono:    ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-serif: 'Iowan Old Style', 'Charter', Georgia, serif;
+  --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-code:  ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-display: var(--font-serif);
+  --font-body:    var(--font-sans);
+  --font-mono:    var(--font-code);
   --font-answer:  var(--font-display);
 
   --success: oklch(50% 0.10 150);
@@ -24,7 +27,7 @@
   --sidebar-w: 248px;
   --rail-w: 332px;
   --col: none;
-  --answer-size: 15.5px;
+  --ui-leading: 1.5;
   --topbar-h: 52px;
 
   color-scheme: light;
@@ -48,22 +51,48 @@
   color-scheme: dark;
 }
 
+/* A chosen face replaces the interface, titles, and answers together. */
+[data-face='serif'] {
+  --font-body: var(--font-serif);
+  --font-display: var(--font-serif);
+  --font-answer: var(--font-serif);
+  --font-mono: var(--font-serif);
+}
+
 [data-face='sans'] {
-  --font-answer: var(--font-body);
-  --answer-size: 15px;
+  --font-body: var(--font-sans);
+  --font-display: var(--font-sans);
+  --font-answer: var(--font-sans);
+  --font-mono: var(--font-sans);
+}
+
+[data-face='mono'] {
+  --font-body: var(--font-code);
+  --font-display: var(--font-code);
+  --font-answer: var(--font-code);
+  --font-mono: var(--font-code);
+}
+
+[data-font='custom'] {
+  --font-body: var(--font-custom, var(--font-sans));
+  --font-display: var(--font-custom, var(--font-sans));
+  --font-answer: var(--font-custom, var(--font-sans));
+  --font-mono: var(--font-custom, var(--font-sans));
 }
 
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
 
+html { font-size: var(--ui-size, 15px); }
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: 1rem;
+  line-height: var(--ui-leading, 1.5);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -82,7 +111,7 @@ a { color: inherit; }
 
 .kicker {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(11 / 15 * 1rem);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
@@ -91,7 +120,7 @@ a { color: inherit; }
 
 .meta {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(11.5 / 15 * 1rem);
   letter-spacing: 0.02em;
   color: var(--muted);
 }
@@ -116,7 +145,7 @@ a { color: inherit; }
 
 .wordmark b {
   font-family: var(--font-display);
-  font-size: 19px;
+  font-size: calc(19 / 15 * 1rem);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -125,7 +154,7 @@ a { color: inherit; }
 
 .btn {
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13 / 15 * 1rem);
   font-weight: 510;
   letter-spacing: 0.02em;
   text-decoration: none;
@@ -182,7 +211,7 @@ a { color: inherit; }
 
 .kbd {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5 / 15 * 1rem);
   letter-spacing: 0.02em;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -218,10 +247,10 @@ a { color: inherit; }
 .switch:checked::after { transform: translateX(16px); }
 .switch:disabled { opacity: 0.45; cursor: default; }
 
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; max-width: 100%; }
 .seg button {
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5 / 15 * 1rem);
   font-weight: 510;
   letter-spacing: 0.02em;
   background: var(--surface);
@@ -246,7 +275,7 @@ input[type='search'],
 select,
 textarea.field {
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13 / 15 * 1rem);
   color: var(--fg);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -274,7 +303,7 @@ textarea.field {
 
 .chip {
   font: inherit;
-  font-size: 11.5px;
+  font-size: calc(11.5 / 15 * 1rem);
   font-weight: 510;
   letter-spacing: 0.02em;
   color: var(--muted);
@@ -346,7 +375,7 @@ textarea.field {
 
 .tag {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10 / 15 * 1rem);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);

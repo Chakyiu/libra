@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 // Runs before first paint so a stored dark theme, collapsed sidebar or reading width never flashes.
 // Keys mirror lib/prefs.ts.
-const BOOT = `(function(){try{var d=document.documentElement,s=localStorage,t=s.getItem('libra:theme')||'light';d.dataset.themePref=t;d.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;var b=s.getItem('libra:sidebar');if(b)d.dataset.sidebar=b;var f=s.getItem('libra:face');if(f)d.dataset.face=f;var c=s.getItem('libra:col');if(c&&c!=='0')d.style.setProperty('--col',c+'rem');}catch(e){}})();`;
+const BOOT = `(function(){try{var d=document.documentElement,s=localStorage,t=s.getItem('libra:theme')||'light';d.dataset.themePref=t;d.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;var b=s.getItem('libra:sidebar');if(b)d.dataset.sidebar=b;var f=s.getItem('libra:face');if(f==='sans'||f==='mono'||f==='serif')d.dataset.face=f;var c=s.getItem('libra:col');if(c&&c!=='0')d.style.setProperty('--col',c+'rem');var z=parseFloat(s.getItem('libra:size'));if(z>=13&&z<=22&&z!==15)d.style.setProperty('--ui-size',z+'px');var l=parseFloat(s.getItem('libra:leading'));if(l>=1.3&&l<=1.85&&l!==1.5)d.style.setProperty('--ui-leading',String(l));var g=(s.getItem('libra:font')||'').replace(/[^A-Za-z0-9 ,.'"-]/g,'').trim();if(g){d.dataset.font='custom';d.style.setProperty('--font-custom',g);}}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

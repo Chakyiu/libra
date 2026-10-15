@@ -23,7 +23,7 @@
 
 .hero h1 {
   font-family: var(--font-display);
-  font-size: 54px;
+  font-size: calc(54 / 15 * 1rem);
   line-height: 1;
   letter-spacing: -0.03em;
   font-weight: 600;
@@ -33,7 +33,7 @@
 
 .hero__sub {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: calc(18 / 15 * 1rem);
   line-height: 1.5;
   color: var(--muted);
   margin: 14px auto 0;
@@ -70,7 +70,7 @@
 .starters a span,
 .starters button span {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: calc(16 / 15 * 1rem);
   line-height: 1.4;
   color: var(--fg);
   flex: 1;
@@ -94,8 +94,8 @@
 .status__item { display: inline-flex; align-items: center; gap: 7px; }
 
 @media (max-width: 760px) {
-  .hero h1 { font-size: 40px; }
-  .hero__sub { font-size: 16px; }
+  .hero h1 { font-size: calc(40 / 15 * 1rem); }
+  .hero__sub { font-size: calc(16 / 15 * 1rem); }
   .home__center { padding: 36px 20px 28px; }
   .status { padding: 10px 20px; gap: 6px 16px; }
 }

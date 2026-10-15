@@ -45,7 +45,7 @@
   padding: 6px 8px;
   border-radius: 3px;
   border-left: 2px solid transparent;
-  font-size: 13px;
+  font-size: calc(13 / 15 * 1rem);
   color: var(--muted);
   text-decoration: none;
   transition: background 120ms, color 120ms;
@@ -66,7 +66,7 @@
 
 .sidebar__empty {
   padding: 14px 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5 / 15 * 1rem);
   line-height: 1.55;
   color: var(--muted);
   margin: 0;
@@ -89,7 +89,7 @@
 }
 
 .thread span {
-  font-size: 13.5px;
+  font-size: calc(13.5 / 15 * 1rem);
   line-height: 1.4;
   color: var(--fg);
   overflow: hidden;
@@ -105,7 +105,7 @@
   margin-top: 4px;
   padding-right: 28px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5 / 15 * 1rem);
   letter-spacing: 0.02em;
   color: var(--muted);
 }
@@ -160,7 +160,7 @@
 
 .topbar__title {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: calc(15 / 15 * 1rem);
   font-weight: 500;
   letter-spacing: -0.005em;
   white-space: nowrap;
@@ -189,7 +189,7 @@
 
 .page__head h2 {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: calc(26 / 15 * 1rem);
   line-height: 1.2;
   letter-spacing: -0.015em;
   font-weight: 600;
@@ -197,7 +197,7 @@
 }
 
 .page__head p:not(.kicker) {
-  font-size: 14px;
+  font-size: calc(14 / 15 * 1rem);
   line-height: 1.55;
   color: var(--muted);
   margin: 0;
@@ -267,19 +267,19 @@
 
 .unlock__box h2 {
   margin: 0;
-  font: 600 19px/1.25 var(--font-display);
+  font: 600 calc(19 / 15 * 1rem)/1.25 var(--font-display);
   letter-spacing: -0.01em;
 }
 
 .unlock__box p {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13 / 15 * 1rem);
   line-height: 1.55;
   color: var(--muted);
 }
 
 .unlock__box code {
-  font: 500 12px/1 var(--font-mono);
+  font: 500 calc(12 / 15 * 1rem)/1 var(--font-code);
   color: var(--fg);
 }
 

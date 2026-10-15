@@ -8,7 +8,7 @@ import { useInstance } from "@/components/instance";
 import { useThreads } from "@/components/threads";
 import { Chat, Provider, Settings, api, deleteChat, putJson } from "@/lib/api";
 import { modelLabel, plural } from "@/lib/format";
-import { PREF_DEFAULTS, setPref, usePref } from "@/lib/prefs";
+import { LEADING_MAX, LEADING_MIN, PREF_DEFAULTS, SIZE_MAX, SIZE_MIN, setPref, usePref } from "@/lib/prefs";
 
 type Tab = "search" | "answering" | "providers" | "appearance" | "data";
 
@@ -595,7 +595,18 @@ function AppearancePanel() {
   const theme = usePref("theme");
   const col = usePref("col");
   const face = usePref("face");
+  const size = usePref("size");
+  const leading = usePref("leading");
+  const font = usePref("font");
   const rail = usePref("rail");
+  const readingChanged =
+    col !== PREF_DEFAULTS.col ||
+    face !== PREF_DEFAULTS.face ||
+    size !== PREF_DEFAULTS.size ||
+    leading !== PREF_DEFAULTS.leading ||
+    font !== PREF_DEFAULTS.font ||
+    theme !== PREF_DEFAULTS.theme ||
+    rail !== PREF_DEFAULTS.rail;
 
   return (
     <>
@@ -630,15 +641,49 @@ function AppearancePanel() {
           aria-label="Answer column width"
         />
       </Row>
-      <Row label="Answer typeface" help="Serif for long prose, sans if you mostly read short factual answers.">
+      <Row label="Font" help="Used for the whole app. Default keeps serif titles and a sans interface.">
         <Seg
-          label="Answer typeface"
+          label="Font"
           value={face}
           onChange={(v) => setPref("face", v)}
           options={[
+            { value: "default", label: "Default" },
             { value: "serif", label: "Serif" },
             { value: "sans", label: "Sans" },
+            { value: "mono", label: "Mono" },
           ]}
+        />
+      </Row>
+      <Row label="Custom font" help="Optional. A family installed on this computer, such as Palatino. It replaces the typeface everywhere, including titles and the sidebar.">
+        <input
+          type="text"
+          value={font}
+          placeholder="Palatino, Georgia, serif"
+          aria-label="Custom font family"
+          spellCheck={false}
+          onChange={(e) => setPref("font", e.target.value)}
+        />
+      </Row>
+      <Row label="Font size" help={`${size}px. The base size for the whole app.`}>
+        <input
+          type="range"
+          min={SIZE_MIN}
+          max={SIZE_MAX}
+          step={0.5}
+          value={size}
+          onChange={(e) => setPref("size", Number(e.target.value))}
+          aria-label="Font size"
+        />
+      </Row>
+      <Row label="Line spacing" help={`${leading.toFixed(2)}. Space between lines across the app.`}>
+        <input
+          type="range"
+          min={LEADING_MIN}
+          max={LEADING_MAX}
+          step={0.05}
+          value={leading}
+          onChange={(e) => setPref("leading", Number(e.target.value))}
+          aria-label="Line spacing"
         />
       </Row>
       <Row label="Open the sources rail by default" help="On narrow windows the rail becomes a sheet you pull up from the bottom." last>
@@ -651,12 +696,12 @@ function AppearancePanel() {
       <div className="preview">
         <div className="answer">
           <p>
-            Restore time stops scaling with the guest’s configured memory and starts scaling with its working set.
+            Restore time stops scaling with the guest’s configured memory and starts scaling with its working set. The second line is here so size and spacing are visible before you leave this page.
             <span className="cite">3</span>
           </p>
         </div>
       </div>
-      {(col !== PREF_DEFAULTS.col || face !== PREF_DEFAULTS.face || theme !== PREF_DEFAULTS.theme || rail !== PREF_DEFAULTS.rail) && (
+      {readingChanged && (
         <p style={{ marginTop: 12 }}>
           <button
             type="button"
@@ -665,6 +710,9 @@ function AppearancePanel() {
               setPref("theme", PREF_DEFAULTS.theme);
               setPref("col", PREF_DEFAULTS.col);
               setPref("face", PREF_DEFAULTS.face);
+              setPref("size", PREF_DEFAULTS.size);
+              setPref("leading", PREF_DEFAULTS.leading);
+              setPref("font", PREF_DEFAULTS.font);
               setPref("rail", PREF_DEFAULTS.rail);
             }}
           >

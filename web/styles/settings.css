@@ -16,7 +16,7 @@
 
 .settings__nav button {
   font: inherit;
-  font-size: 13.5px;
+  font-size: calc(13.5 / 15 * 1rem);
   font-weight: 510;
   letter-spacing: 0.01em;
   text-align: left;
@@ -37,7 +37,7 @@
 
 .panel h2 {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: calc(26 / 15 * 1rem);
   line-height: 1.2;
   letter-spacing: -0.015em;
   font-weight: 600;
@@ -45,7 +45,7 @@
 }
 
 .panel header p:not(.kicker) {
-  font-size: 14px;
+  font-size: calc(14 / 15 * 1rem);
   line-height: 1.55;
   color: var(--muted);
   margin: 0 0 8px;
@@ -65,14 +65,14 @@
 
 .srow--last { border-bottom: 1px solid var(--border); }
 
-.srow__label { font-size: 14px; font-weight: 550; letter-spacing: 0.01em; margin: 0 0 3px; }
-.srow__help { font-size: 12.5px; line-height: 1.5; color: var(--muted); margin: 0; max-width: 52ch; }
+.srow__label { font-size: calc(14 / 15 * 1rem); font-weight: 550; letter-spacing: 0.01em; margin: 0 0 3px; }
+.srow__help { font-size: calc(12.5 / 15 * 1rem); line-height: 1.5; color: var(--muted); margin: 0; max-width: 52ch; }
 .srow__control { display: flex; align-items: center; gap: 10px; justify-self: end; }
 .srow__control select { min-width: 190px; max-width: 18rem; }
 .srow__control input[type='text'],
 .srow__control input[type='password'],
 .srow__control input[type='url'] { width: 15rem; }
-.srow__control input.is-mono { font-family: var(--font-mono); font-size: 12px; }
+.srow__control input.is-mono { font-family: var(--font-mono); font-size: calc(12 / 15 * 1rem); }
 .srow__stack { display: flex; flex-direction: column; gap: 6px; }
 
 .srow--connector { grid-template-columns: 26px minmax(0, 1fr) auto; }
@@ -95,10 +95,10 @@
   margin-bottom: 12px;
   min-width: 0;
 }
-.provider__head b { font-size: 14px; font-weight: 550; }
+.provider__head b { font-size: calc(14 / 15 * 1rem); font-weight: 550; }
 
 .provider__note {
-  font-size: 12.5px;
+  font-size: calc(12.5 / 15 * 1rem);
   line-height: 1.5;
   color: var(--muted);
   margin: -4px 0 12px;
@@ -108,7 +108,7 @@
 
 .provider-presets { flex-wrap: wrap; justify-content: flex-end; max-width: 26rem; }
 
-.field-error { font-style: normal; font-size: 11.5px; color: var(--accent); }
+.field-error { font-style: normal; font-size: calc(11.5 / 15 * 1rem); color: var(--accent); }
 .field-label input[aria-invalid='true'] { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
 
 .panel__callout { margin: 18px 0 20px; }
@@ -122,7 +122,7 @@
 .field-label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field-label > span {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5 / 15 * 1rem);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -137,7 +137,7 @@
   margin-top: 8px;
   background: var(--surface);
 }
-.preview .answer > p { margin: 0; max-width: none; }
+.preview .answer > p { margin: 0; max-width: 46ch; }
 
 /* the save bar floats at the bottom of the panel while there are unsaved edits */
 .savebar {
@@ -153,7 +153,7 @@
   background: var(--bg);
   border-top: 1px solid var(--border);
 }
-.savebar__msg { font-size: 13px; color: var(--muted); }
+.savebar__msg { font-size: calc(13 / 15 * 1rem); color: var(--muted); }
 .savebar__msg.is-error { color: var(--accent); }
 
 @media (max-width: 860px) {
