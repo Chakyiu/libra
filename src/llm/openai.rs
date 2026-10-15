@@ -32,6 +32,14 @@ fn drop_max_tokens(body: &mut Value) -> bool {
         .is_some()
 }
 
+/// Drop `reasoning.effort` first. Some servers reject that field and still honor
+/// `enable_thinking`, which is what actually keeps the reply out of the notes.
+fn drop_reasoning_field(body: &mut Value) -> bool {
+    body.as_object_mut()
+        .and_then(|o| o.remove("reasoning"))
+        .is_some()
+}
+
 /// Drop the thinking-off flags when a server rejects them as unknown fields.
 fn clear_reasoning_controls(body: &mut Value) -> bool {
     let Some(obj) = body.as_object_mut() else {
@@ -112,8 +120,24 @@ pub fn spawn_stream(
         } else {
             // A 400 is often an unknown field, or max_tokens larger than the context.
             // Drop one of those and try again before failing the answer.
+            // `reasoning` goes first so `enable_thinking: false` can stay.
             let mut retry = resp;
-            if clear_reasoning_controls(&mut body) {
+            if drop_reasoning_field(&mut body) {
+                match request(&http, &base, &key, "chat/completions", &body)
+                    .send()
+                    .await
+                {
+                    Ok(next) => retry = next,
+                    Err(e) => {
+                        let _ = tx.send(Delta::Error(format!("provider connect failed: {e}")));
+                        return;
+                    }
+                }
+            }
+            if !retry.status().is_success()
+                && retry.status().as_u16() == 400
+                && clear_reasoning_controls(&mut body)
+            {
                 match request(&http, &base, &key, "chat/completions", &body)
                     .send()
                     .await

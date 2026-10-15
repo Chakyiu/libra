@@ -1457,18 +1457,18 @@ impl Pipeline {
                     "reasoning loop: the model repeated itself instead of answering"
                 );
             }
-            // Keep the thinking that came before the loop, drop the cycles after it.
-            if !line.is_empty() {
-                mind.cut_loop(&line);
-            }
-            store_thought(blocks, mind.text);
             if body {
+                // Keep the thinking that came before the loop, drop the cycles after it.
+                if !line.is_empty() {
+                    mind.cut_loop(&line);
+                    store_thought(blocks, mind.text);
+                }
                 return Ok(());
             }
-            if !line.is_empty() {
-                return Err(LOOPING.to_string());
-            }
-            return self
+            // The repeated line often sits inside a draft of the reply. Cutting first
+            // throws that draft away, and the user only sees the loop error.
+            let fallback = if line.is_empty() { BUDGET_USED } else { LOOPING };
+            let result = self
                 .reply_from_notes(
                     llm,
                     system,
@@ -1479,9 +1479,14 @@ impl Pipeline {
                     answer,
                     tx,
                     allow_notes,
-                    BUDGET_USED,
+                    fallback,
                 )
                 .await;
+            if result.is_err() && !line.is_empty() {
+                mind.cut_loop(&line);
+                store_thought(blocks, mind.text);
+            }
+            return result;
         }
         if !body && !turn.cancel.load(Ordering::Acquire) {
             return self
@@ -1503,7 +1508,8 @@ impl Pipeline {
     }
 
     /// The notes already contain the answer and the reply channel was empty. One more
-    /// call, with reasoning off, writes that reply. A real repetition loop is not retried.
+    /// call, with reasoning off, writes that reply. It runs once, including after a
+    /// repeated line, because that line is often in the middle of a real draft.
     async fn reply_from_notes(
         &self,
         llm: &Llm,
@@ -1528,7 +1534,7 @@ impl Pipeline {
         messages.push(msg(
             "user",
             format!(
-                "Write the reply the user will read. They have not seen these notes. Do not plan again.\n\nNotes:\n{notes}"
+                "Write the reply the user will read. They have not seen these notes. Do not plan again.\n\nNotes:\n{notes}\n\n/no_think"
             ),
         ));
         tracing::info!(model = %llm.model, "answer was only in the notes; writing the reply");
