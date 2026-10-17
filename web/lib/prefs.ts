@@ -126,7 +126,7 @@ function setOrClear(root: HTMLElement, name: string, value: string | null) {
 }
 
 /** Mirror the stored prefs onto <html>, where the CSS reads them. */
-function apply() {
+export function applyPrefs() {
   const root = document.documentElement;
   root.dataset.themePref = getPref("theme");
   root.dataset.theme = resolvedTheme();
@@ -148,10 +148,19 @@ function apply() {
     delete root.dataset.font;
     root.style.removeProperty("--font-custom");
   }
+  const chrome = resolvedTheme() === "dark" ? "#2a2724" : "#faf8f5";
+  document.querySelectorAll('meta[name="theme-color"]').forEach((node, index) => {
+    if (index > 0) {
+      node.remove();
+      return;
+    }
+    node.setAttribute("content", chrome);
+    node.removeAttribute("media");
+  });
 }
 
 function notify() {
-  apply();
+  applyPrefs();
   listeners.forEach((fn) => fn());
 }
 
