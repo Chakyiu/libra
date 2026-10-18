@@ -692,6 +692,13 @@ impl Pipeline {
             cls.needs_image_results = false;
             cls.needs_video_results = false;
         }
+        // "https://… 總結" asks for that page, including on a later turn. The
+        // follow-up model otherwise treats 總結 as "rewrite the previous answer"
+        // and the link is never opened.
+        if !crate::fetch::user_urls(&[&req.query]).is_empty() {
+            from_history = false;
+            cls.need_web_search = true;
+        }
 
         // 2. widgets, then the browser location when the question depends on where the user is.
         // Attached files are about the file, so they do not prompt for a place.

@@ -24,6 +24,7 @@ const PAGE_CHARS: usize = 6_000;
 const SNIPPET_CHARS: usize = 280;
 const ALREADY_READ: usize = 800;
 const MIN_BODY: usize = 40;
+const DOCUMENT_CHARS: usize = 500;
 const MAX_USER_URLS: usize = 4;
 const PARALLEL: usize = 4;
 const HTTP_BYTES: usize = 1_500_000;
@@ -214,16 +215,27 @@ async fn read_one(cfg: &Config, url: &str, cancel: &AtomicBool) -> Option<PageBo
         tracing::info!(url = %url, "skipped page read; host is not a public address");
         return None;
     }
+    // A server-rendered article is already in the HTML. Obscura is for a thin or
+    // blocked response. Its rendered "allow ads" screen must not replace the article.
+    let http_page = read_http(cfg, &url).await;
+    if http_page
+        .as_ref()
+        .is_some_and(|page| is_document(&page.text))
+    {
+        let chars = http_page.as_ref().map(|page| page.text.chars().count());
+        tracing::info!(url = %url, via = "http", ?chars, "read page");
+        return http_page;
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return http_page.filter(|page| usable(&page.text));
+    }
     if let Some(page) = read_obscura(cfg, &url).await {
         if usable(&page.text) {
             tracing::info!(url = %url, via = "obscura", chars = page.text.chars().count(), "read page");
             return Some(page);
         }
     }
-    if cancel.load(Ordering::Relaxed) {
-        return None;
-    }
-    let page = read_http(cfg, &url).await?;
+    let page = http_page?;
     if !usable(&page.text) {
         return None;
     }
@@ -392,6 +404,10 @@ fn page_from_text(url: &str, text: &str) -> PageBody {
 fn usable(text: &str) -> bool {
     let trimmed = text.trim();
     trimmed.chars().count() >= MIN_BODY && !is_challenge(trimmed)
+}
+
+fn is_document(text: &str) -> bool {
+    usable(text) && text.trim().chars().count() >= DOCUMENT_CHARS
 }
 
 fn is_challenge(text: &str) -> bool {
@@ -834,6 +850,29 @@ mod tests {
                 "https://example.com/a",
             ]
         );
+    }
+
+    #[test]
+    fn a_summary_link_is_still_a_page_to_open() {
+        let q = "https://www.hk01.com/%E6%95%B8%E7%A2%BC%E7%94%9F%E6%B4%BB/60398823/nvidia-rtx-5090 總結";
+        assert_eq!(user_urls(&[q]).len(), 1);
+    }
+
+    #[test]
+    fn the_article_html_is_kept_when_a_script_mentions_the_ad_wall() {
+        let body = "受AI市場需求影響，NVIDIA 傳出 RTX 5090 全面停產，GB202 晶片轉供數據中心，旗艦遊戲卡面臨停產。".repeat(12);
+        let html = format!(
+            r#"<html><head><title>NVIDIA RTX 5090傳全面停產</title>
+            <script>Please allow ads on this site. Integrity check failed.</script>
+            </head><body><article><p>{body}</p></article></body></html>"#
+        );
+        let (title, text) = html_to_text(&html, "https://www.hk01.com/a");
+        assert!(title.contains("5090"));
+        assert!(text.contains("GB202"));
+        assert!(is_document(&text));
+        assert!(!usable(
+            "# Please allow ads on this site\n\nOur site is supported by ads."
+        ));
     }
 
     #[test]

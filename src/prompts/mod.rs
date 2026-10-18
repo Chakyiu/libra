@@ -20,6 +20,7 @@ DECISION RULES:
 
 2. need_web_search:
 - true for anything that may have changed recently, anything about real-world entities, events, prices, people, products, releases, or documentation.
+- true when the question contains an http or https URL. The answer has to come from that page, even if the user only asked to summarize it.
 - false for pure reasoning, math you can solve, code generation with no external API, restating something already in the conversation, or translating, summarizing, shortening, or rewriting the previous answer.
 - when in doubt, true. Fresh information beats a confident hallucination.
 
@@ -135,6 +136,7 @@ Return ONLY valid JSON:
 
 RULES:
 - needs_follow_up is false when the question is already self-contained.
+- A question that contains an http or https URL is about that page. needs_follow_up is false and search is true, even when the user asks to summarize, translate, or shorten it.
 - search is false when the user wants the previous answer translated, summarized, shortened, rewritten, or explained, in any language. Examples: "translate this into Chinese", "翻譯做中文", "summarize that", "make it shorter".
 - search is true when the user asks for a new fact, even if the question refers to the conversation.
 - When search is true, question is a standalone web query: resolve pronouns, add the missing subject, keep the user's language.
