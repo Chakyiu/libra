@@ -52,6 +52,8 @@ export type Health = {
   status: string;
   redis: boolean;
   searchProviders: string[];
+  /** obscura when the browser binary is installed, http for the plain fallback, off when reading is disabled */
+  pageReader?: "obscura" | "http" | "off";
   models: ModelOptions;
 };
 

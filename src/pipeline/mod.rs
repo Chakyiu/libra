@@ -41,7 +41,7 @@ struct Stop {
 }
 
 struct StopInner {
-    flag: AtomicBool,
+    flag: Arc<AtomicBool>,
     notify: Notify,
     /// Answer-token HTTP read. Aborted on stop even if the pipeline is in a short DB write.
     stream: Mutex<Option<tokio::task::AbortHandle>>,
@@ -51,11 +51,16 @@ impl Stop {
     fn new(stopped: bool) -> Self {
         Self {
             inner: Arc::new(StopInner {
-                flag: AtomicBool::new(stopped),
+                flag: Arc::new(AtomicBool::new(stopped)),
                 notify: Notify::new(),
                 stream: Mutex::new(None),
             }),
         }
+    }
+
+    /// Shared cancel flag a page fetch can watch without borrowing this stop handle.
+    fn token(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.inner.flag)
     }
 
     fn load(&self, order: Ordering) -> bool {
@@ -1001,6 +1006,43 @@ impl Pipeline {
         }
         candidates.truncate(cfg.rerank_limit);
 
+        // Search returns snippets. Read the question's own links and the sources
+        // that survived reranking so the answer is written from the page.
+        if !from_history && document_context.is_none() && cfg.read_pages {
+            let user_urls = crate::fetch::user_urls(&[&req.query, &search_query]);
+            let budget = page_budget(depth, cfg.fetch_page_limit);
+            if !crate::fetch::plan_reads(&user_urls, &candidates, budget).is_empty() {
+                let note = Block::research(
+                    depth.as_str(),
+                    depth.rounds(),
+                    depth.rounds(),
+                    &[],
+                    "Reading pages",
+                    "read",
+                );
+                blocks.push(note.clone());
+                Self::emit_block(&tx, note);
+                self.checkpoint(&turn, &answer, &blocks, "read", "").await;
+                if self.halt(&turn, &answer, &blocks, &tx).await {
+                    return;
+                }
+                let cancel = turn.cancel.token();
+                candidates = match cut(
+                    &turn.cancel,
+                    &tx,
+                    crate::fetch::enrich(&cfg, &user_urls, candidates, budget, &cancel),
+                )
+                .await
+                {
+                    Ok(read) => read,
+                    Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
+                };
+                if self.halt(&turn, &answer, &blocks, &tx).await {
+                    return;
+                }
+            }
+        }
+
         let references = if from_history {
             "No new web search. Use the previous answer below as the text to work from.".into()
         } else if candidates.is_empty() && !clocked.is_empty() {
@@ -1467,7 +1509,11 @@ impl Pipeline {
             }
             // The repeated line often sits inside a draft of the reply. Cutting first
             // throws that draft away, and the user only sees the loop error.
-            let fallback = if line.is_empty() { BUDGET_USED } else { LOOPING };
+            let fallback = if line.is_empty() {
+                BUDGET_USED
+            } else {
+                LOOPING
+            };
             let result = self
                 .reply_from_notes(
                     llm,
@@ -2163,6 +2209,16 @@ impl Depth {
     }
 }
 
+/// How many cited pages to open. Links in the question are extra, up to four.
+fn page_budget(depth: Depth, configured: usize) -> usize {
+    let n = configured.clamp(1, 12);
+    match depth {
+        Depth::Fast => n.min(3),
+        Depth::Balance => n,
+        Depth::Deep => (n + 3).min(12),
+    }
+}
+
 async fn plan_queries(
     llm: &Llm,
     question: &str,
@@ -2269,7 +2325,15 @@ fn numbered(results: &[SearchResult]) -> String {
     results
         .iter()
         .enumerate()
-        .map(|(i, r)| format!("[{}] {} — {}\n{}", i + 1, r.title, r.url, r.snippet))
+        .map(|(i, r)| {
+            let body = r
+                .content
+                .as_deref()
+                .filter(|c| !c.trim().is_empty())
+                .unwrap_or(&r.snippet);
+            let body: String = body.chars().take(600).collect();
+            format!("[{}] {} — {}\n{body}", i + 1, r.title, r.url)
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -2520,21 +2584,30 @@ fn normalize_url(url: &str) -> String {
 }
 
 /// The numbered reference block the answer prompt cites against.
+/// Page text is kept longer than a snippet, with a cap across the whole list.
 fn build_references(results: &[SearchResult]) -> String {
     if results.is_empty() {
         return "(no search results — answer from what you know and say you could not verify)"
             .into();
     }
+    const PAGE_CAP: usize = 6_000;
+    const SNIP_CAP: usize = 1_200;
+    const TOTAL_CAP: usize = 28_000;
+    let mut used = 0usize;
     results
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let body = r
-                .content
-                .as_deref()
-                .filter(|c| !c.trim().is_empty())
-                .unwrap_or(&r.snippet);
-            let body: String = body.chars().take(1200).collect();
+            let has_page = r.content.as_deref().is_some_and(|c| !c.trim().is_empty());
+            let body = if has_page {
+                r.content.as_deref().unwrap_or("")
+            } else {
+                r.snippet.as_str()
+            };
+            let room = TOTAL_CAP.saturating_sub(used).max(400);
+            let cap = if has_page { PAGE_CAP } else { SNIP_CAP };
+            let body: String = body.chars().take(cap.min(room)).collect();
+            used += body.chars().count();
             format!(
                 "[{}] {}\nURL: {}\n{}\n{}",
                 i + 1,
@@ -2618,6 +2691,24 @@ mod tests {
             url: url.into(),
             ..SearchResult::default()
         }
+    }
+
+    #[test]
+    fn fast_reads_fewer_pages_than_deep() {
+        assert_eq!(page_budget(Depth::Fast, 5), 3);
+        assert_eq!(page_budget(Depth::Balance, 5), 5);
+        assert_eq!(page_budget(Depth::Deep, 5), 8);
+        assert_eq!(page_budget(Depth::Deep, 12), 12);
+    }
+
+    #[test]
+    fn page_text_reaches_the_answer_prompt() {
+        let mut hit = hit("https://example.com/a");
+        hit.snippet = "short".into();
+        hit.content = Some("p".repeat(2_000));
+        let refs = build_references(&[hit]);
+        assert!(refs.contains(&"p".repeat(2_000)));
+        assert!(refs.contains("https://example.com/a"));
     }
 
     #[test]

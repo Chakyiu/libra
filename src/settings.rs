@@ -61,6 +61,16 @@ fn validate(cfg: &Config, db_path: &Path) -> Result<(), LibraError> {
             "rerankLimit must be between 1 and 50".into(),
         ));
     }
+    if cfg.fetch_page_limit == 0 || cfg.fetch_page_limit > 12 {
+        return Err(LibraError::BadRequest(
+            "fetchPageLimit must be between 1 and 12".into(),
+        ));
+    }
+    if !(5..=60).contains(&cfg.fetch_timeout_secs) {
+        return Err(LibraError::BadRequest(
+            "fetchTimeoutSecs must be between 5 and 60".into(),
+        ));
+    }
     if !(0.0..=2.0).contains(&cfg.default_temperature) {
         return Err(LibraError::BadRequest(
             "defaultTemperature must be between 0 and 2".into(),

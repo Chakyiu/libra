@@ -80,8 +80,10 @@ The research loop is the main behavioural deviation. Upstream drives a multi-ite
 through native tool calls, which needs a strong model. Libra instead asks the **fast** model what
 to search first, runs those queries, then asks it what to search next. Balance does one follow-up
 round, Deep does two, Fast stops after the first. The fast model then drops sources that cannot
-help, the **rerank** model orders what remains, and the **answer** model writes. Pages are not
-scraped one by one — the snippets you searched are the snippets you answer from.
+help, the **rerank** model orders what remains, and Libra reads the question's links and
+those sources before the **answer** model writes. [Obscura](https://github.com/h4ckf0r0day/obscura)
+does that read when it is installed: it runs the page's scripts and, in a stealth build, fetches
+with a browser-like TLS fingerprint. Without the binary, Libra falls back to a plain HTTP fetch.
 
 Three model slots, so a 7B local model can plan and filter while a bigger one writes:
 
@@ -204,7 +206,8 @@ src/
   blocks.rs          the block protocol streamed to the UI
   llm/               openai-compatible, anthropic, gemini; SSE + JSON extraction
   search/            provider trait + 7 providers + fallback router with Redis cache
-  pipeline/          ask(): classify → widgets → plan → rounds → filter → rerank → answer (or report) → suggestions
+  pipeline/          ask(): classify → widgets → plan → rounds → filter → rerank → read pages → answer (or report) → suggestions
+  fetch.rs           read cited pages with Obscura, or a plain HTTP fetch when it is not installed
   uploads/           text/pdf/docx/image extraction, chunking, embedding, cosine retrieval
   widgets/           calculator, currency (ECB rates), time, weather (Open-Meteo), stocks (Nasdaq)
   prompts/           every LLM prompt; all of them return strict JSON
@@ -238,7 +241,7 @@ representative rather than real.
 
 ## Known limits
 
-- **No page scraping in the answer path.** Answers come from search snippets. Firecrawl's scrape endpoint is implemented but not wired in yet.
+- **Page reading stops at an interactive challenge.** Obscura covers JavaScript and basic TLS fingerprint checks. Cloudflare challenges, Datadome, Akamai Bot Manager, and CAPTCHAs still come back empty, and the answer falls back to the snippet. Without the `obscura` binary the reader is a plain HTTP fetch, which misses script-rendered pages.
 - **One shared token, not users.** `LIBRA_AUTH_TOKEN` is a single secret for the whole instance: no accounts, no per-thread ownership, no session expiry. Everything else about who may reach the port is your reverse proxy's job.
 - **Currency rates are the ECB's daily reference set.** About 30 currencies from Frankfurter, with ExchangeRate-API as a fallback for the rest; a pair neither lists renders no widget. Rates update once a day and are cached for 6 hours.
 - **A discussion report is one pass per section.** The sections do not see each other's prose, only the outline, so a report reads as six good paragraphs rather than one argued piece. It also costs 4–6 answer-model calls instead of one.

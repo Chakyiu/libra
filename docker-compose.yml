@@ -9,6 +9,7 @@ services:
       DATABASE_URL: /data/libra.db
       REDIS_URL: redis://redis:6379
       SEARXNG_API_URL: http://searxng:8080
+      OBSCURA_BIN: /usr/local/bin/obscura
       RUST_LOG: info
       # The port below is published on the host. Set a token before exposing it anywhere real.
       # LIBRA_AUTH_TOKEN: change-me

@@ -121,6 +121,7 @@ async fn health(State(app): State<Arc<App>>) -> Json<Value> {
         "status": "ok",
         "redis": app.cache.enabled(),
         "searchProviders": app.search.provider_names(),
+        "pageReader": crate::fetch::reader_kind(&cfg),
         "models": cfg.model_options(),
     }))
 }

@@ -5,6 +5,7 @@ mod config;
 mod db;
 mod discover;
 mod error;
+mod fetch;
 mod llm;
 mod media;
 mod pipeline;

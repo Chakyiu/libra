@@ -258,7 +258,19 @@ function ModelSelect({
 
 type SetField = <K extends keyof Settings>(key: K, value: Settings[K]) => void;
 
-function SearchPanel({ s, set, providerNames, redis }: { s: Settings; set: SetField; providerNames: string[]; redis?: boolean }) {
+function SearchPanel({
+  s,
+  set,
+  providerNames,
+  redis,
+  reader,
+}: {
+  s: Settings;
+  set: SetField;
+  providerNames: string[];
+  redis?: boolean;
+  reader?: string;
+}) {
   const enabled = s.enabledProviders?.length ? s.enabledProviders : providerNames;
   const on = (id: string) => enabled.includes(id);
   const onCount = providerNames.filter(on).length;
@@ -339,11 +351,68 @@ function SearchPanel({ s, set, providerNames, redis }: { s: Settings; set: SetFi
       <Row label="Video results" help="Search videos when a question asks for them.">
         <Switch checked={!!s.enableVideoSearch} onChange={(v) => set("enableVideoSearch", v)} label="Video results" />
       </Row>
-      <Row label="News for time-limited requests" help="When an API request sets a freshness window, also search news and merge what it finds." last>
+      <Row label="News for time-limited requests" help="When an API request sets a freshness window, also search news and merge what it finds.">
         <Switch checked={!!s.enableFreshSearch} onChange={(v) => set("enableFreshSearch", v)} label="News for time-limited requests" />
+      </Row>
+
+      <p className="kicker panel__sub">Page reading{readerLabel(reader) ? ` · ${readerLabel(reader)}` : ""}</p>
+      <Row
+        label="Read cited pages"
+        help="Open links in the question and the sources the answer will cite. Obscura runs the page’s scripts and can use a browser-like connection. A plain request is used when Obscura is not installed."
+      >
+        <Switch checked={s.readPages !== false} onChange={(v) => set("readPages", v)} label="Read cited pages" />
+      </Row>
+      <Row
+        label="Stealth transport"
+        help="Ask Obscura to match a browser’s TLS fingerprint. The Docker image includes that build. Interactive challenges still stop the fetch."
+      >
+        <Switch checked={s.obscuraStealth !== false} onChange={(v) => set("obscuraStealth", v)} label="Stealth transport" />
+      </Row>
+      <Row label="Obscura binary" help="Path to the obscura executable, or a name on PATH.">
+        <input
+          type="text"
+          value={s.obscuraBin ?? "obscura"}
+          onChange={(e) => set("obscuraBin", e.target.value)}
+          aria-label="Obscura binary"
+          spellCheck={false}
+        />
+      </Row>
+      <Row
+        label="Pages to read"
+        help={`How many sources Balance reads, besides links in the question. ${s.fetchPageLimit ?? 5} currently. Fast reads fewer and Deep reads a few more.`}
+      >
+        <input
+          type="range"
+          min={1}
+          max={12}
+          value={s.fetchPageLimit ?? 5}
+          onChange={(e) => set("fetchPageLimit", Number(e.target.value))}
+          aria-label="Pages to read"
+        />
+      </Row>
+      <Row label="Page timeout" help="Seconds one page may take to open." last>
+        <input
+          type="number"
+          min={5}
+          max={60}
+          value={s.fetchTimeoutSecs ?? 20}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n)) set("fetchTimeoutSecs", Math.min(60, Math.max(5, Math.round(n))));
+          }}
+          aria-label="Page timeout"
+          style={{ width: "6rem" }}
+        />
       </Row>
     </>
   );
+}
+
+function readerLabel(reader?: string) {
+  if (reader === "obscura") return "Obscura";
+  if (reader === "http") return "plain HTTP";
+  if (reader === "off") return "off";
+  return "";
 }
 
 function AnsweringPanel({ s, set, onAddProvider }: { s: Settings; set: SetField; onAddProvider: () => void }) {
@@ -899,7 +968,13 @@ export default function SettingsForm() {
                 </div>
               )}
               {tab === "search" && draft && (
-                <SearchPanel s={draft} set={set} providerNames={providerNames} redis={instance.health?.redis} />
+                <SearchPanel
+                  s={draft}
+                  set={set}
+                  providerNames={providerNames}
+                  redis={instance.health?.redis}
+                  reader={instance.health?.pageReader}
+                />
               )}
               {tab === "answering" && draft && <AnsweringPanel s={draft} set={set} onAddProvider={() => choose("providers")} />}
               {tab === "providers" && draft && <ProvidersPanel providers={draft.providers} onChange={setProviders} />}

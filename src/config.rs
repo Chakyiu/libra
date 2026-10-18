@@ -61,6 +61,17 @@ pub struct Config {
     pub firecrawl_api_key: String,
     pub firecrawl_url: String,
 
+    /// Read the pages behind a question's links and the sources an answer cites.
+    pub read_pages: bool,
+    /// `obscura` on `PATH`, or a path to the binary.
+    pub obscura_bin: String,
+    /// Browser-like TLS fingerprint. Needs an Obscura build with the stealth feature.
+    pub obscura_stealth: bool,
+    /// How many cited sources Balance reads, besides links in the question.
+    pub fetch_page_limit: usize,
+    /// Seconds Obscura may spend on one page.
+    pub fetch_timeout_secs: usize,
+
     pub num_web_results: usize,
     pub rerank_limit: usize,
     pub document_chunk_limit: usize,
@@ -169,6 +180,19 @@ impl Config {
             tavily_api_key: String::new(),
             firecrawl_api_key: String::new(),
             firecrawl_url: "https://api.firecrawl.dev".into(),
+            read_pages: true,
+            obscura_bin: std::env::var("OBSCURA_BIN").unwrap_or_else(|_| "obscura".into()),
+            obscura_stealth: std::env::var("OBSCURA_STEALTH")
+                .map(|v| !matches!(v.as_str(), "0" | "false" | "off"))
+                .unwrap_or(true),
+            fetch_page_limit: std::env::var("FETCH_PAGE_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(5),
+            fetch_timeout_secs: std::env::var("FETCH_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(20),
             num_web_results: 20,
             rerank_limit: 7,
             document_chunk_limit: 12,
@@ -253,6 +277,11 @@ impl Config {
             "tavilyApiKey": self.tavily_api_key,
             "firecrawlApiKey": self.firecrawl_api_key,
             "firecrawlUrl": self.firecrawl_url,
+            "readPages": self.read_pages,
+            "obscuraBin": self.obscura_bin,
+            "obscuraStealth": self.obscura_stealth,
+            "fetchPageLimit": self.fetch_page_limit,
+            "fetchTimeoutSecs": self.fetch_timeout_secs,
             "numWebResults": self.num_web_results,
             "rerankLimit": self.rerank_limit,
             "documentChunkLimit": self.document_chunk_limit,
@@ -326,6 +355,11 @@ impl Config {
         s!("tavilyApiKey", self.tavily_api_key);
         s!("firecrawlApiKey", self.firecrawl_api_key);
         s!("firecrawlUrl", self.firecrawl_url);
+        b!("readPages", self.read_pages);
+        s!("obscuraBin", self.obscura_bin);
+        b!("obscuraStealth", self.obscura_stealth);
+        n!("fetchPageLimit", self.fetch_page_limit);
+        n!("fetchTimeoutSecs", self.fetch_timeout_secs);
         n!("numWebResults", self.num_web_results);
         n!("rerankLimit", self.rerank_limit);
         n!("documentChunkLimit", self.document_chunk_limit);
@@ -379,6 +413,27 @@ impl Config {
         }
         if let Ok(v) = std::env::var("FIRECRAWL_API_KEY") {
             self.firecrawl_api_key = v;
+        }
+        if std::env::var("OBSCURA_DISABLED").ok().as_deref() == Some("1") {
+            self.read_pages = false;
+        }
+        if let Ok(v) = std::env::var("OBSCURA_BIN") {
+            if !v.trim().is_empty() {
+                self.obscura_bin = v;
+            }
+        }
+        if let Ok(v) = std::env::var("OBSCURA_STEALTH") {
+            self.obscura_stealth = !matches!(v.as_str(), "0" | "false" | "off");
+        }
+        if let Ok(v) = std::env::var("FETCH_PAGE_LIMIT") {
+            if let Ok(n) = v.parse() {
+                self.fetch_page_limit = n;
+            }
+        }
+        if let Ok(v) = std::env::var("FETCH_TIMEOUT_SECS") {
+            if let Ok(n) = v.parse() {
+                self.fetch_timeout_secs = n;
+            }
         }
         if let Ok(v) = std::env::var("WEB_SEARCH_NUM_RESULTS") {
             if let Ok(n) = v.parse() {
@@ -529,6 +584,21 @@ mod tests {
             cfg.search_order_web,
             vec!["brave".to_string(), "searxng".to_string()]
         );
+        cfg.apply_settings(&serde_json::json!({
+            "readPages": false,
+            "obscuraBin": "/usr/local/bin/obscura",
+            "obscuraStealth": false,
+            "fetchPageLimit": 8,
+            "fetchTimeoutSecs": 15
+        }));
+        assert!(!cfg.read_pages);
+        assert_eq!(cfg.obscura_bin, "/usr/local/bin/obscura");
+        assert!(!cfg.obscura_stealth);
+        assert_eq!(cfg.fetch_page_limit, 8);
+        assert_eq!(cfg.fetch_timeout_secs, 15);
+        let json = cfg.settings_json();
+        assert_eq!(json["readPages"], false);
+        assert_eq!(json["fetchPageLimit"], 8);
     }
 
     #[test]
