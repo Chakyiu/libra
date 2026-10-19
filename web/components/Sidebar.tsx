@@ -3,14 +3,17 @@
 import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CloseIcon, CompassIcon, GearIcon, Mark, MenuIcon, PlusIcon } from "@/components/icons";
+import { CloseIcon, CompassIcon, GearIcon, Mark, MenuIcon, PlusIcon, TimerIcon } from "@/components/icons";
 import { useInstance } from "@/components/instance";
 import { useShell } from "@/components/shell-context";
 import { useThreads } from "@/components/threads";
 import type { Chat } from "@/lib/api";
 import { Group, cleanTitle, groupOf, plural, threadTime, toDate } from "@/lib/format";
 
-const TOOLS = [{ href: "/discover/", label: "Discover", Icon: CompassIcon }];
+const TOOLS = [
+  { href: "/discover/", label: "Discover", Icon: CompassIcon },
+  { href: "/automator/", label: "Automator", Icon: TimerIcon },
+];
 
 export default function Sidebar() {
   const pathname = usePathname();

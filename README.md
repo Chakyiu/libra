@@ -27,6 +27,7 @@ One binary serves the API and the pre-built UI.
 - **Answers that do things.** Calculator, currency conversion, world clock, weather (Open-Meteo) and stock quotes with charts (Nasdaq) render as blocks above the prose.
 - **Your files and your photos.** Upload `txt`, `md`, `csv`, `pdf`, `docx` or images; documents are chunked, embedded and retrieved by cosine similarity, images go to a vision model.
 - **Image and video results, a Discover feed** (tech, finance, art, sports, entertainment) that opens a thread summarising the story, and optional image generation.
+- **An Automator.** Cron jobs Libra runs for you: one shell line inside a throwaway [microsandbox](https://github.com/superradcompany/microsandbox) microVM, or a saved question whose answer is filed as a thread. Per-job timezone, run history, run-now, and an optional webhook when a run ends.
 - **Multilingual.** Ask in Chinese, get a Chinese answer and a Chinese thread title.
 - **Stops, survives, reloads.** Answers stream over SSE; reloading mid-answer restores the partial turn and keeps polling. Stopping keeps what was written. No accounts, no cookies, no telemetry.
 - **Optional access token.** Set one env var and every `/api` call needs it; cross-origin access is closed by default. See [Securing it](#securing-it).
@@ -136,6 +137,42 @@ chosen from them are the exception — those come only from Settings, never from
 Search fallback order is per kind (`WEB_SEARCH_ORDER`, `NEWS_SEARCH_ORDER`, `IMAGE_SEARCH_ORDER`,
 `VIDEO_SEARCH_ORDER`).
 
+### Scheduled jobs
+
+The Automator keeps its schedules on the host — microsandbox deliberately has no scheduler, so each
+run is a fresh disposable microVM (`msb run --name libra-<job> --replace --memory 256M
+--max-duration 5m -- <image> -- sh -lc '<command>'`) and the timer lives here. Command jobs need the
+`msb` CLI on the machine serving Libra:
+
+```bash
+curl -fsSL https://install.microsandbox.dev | sh   # macOS / Linux; needs /dev/kvm on Linux, Apple Silicon on macOS
+# MSB_BIN=msb                                      # or an absolute path to the binary
+```
+
+Prompt jobs need no extra binary: they call the same answer pipeline the UI uses, so the answer
+appears in the sidebar and the run links to it. A job's optional `notify_url` gets a JSON `POST`
+when a run ends — an ntfy topic works out of the box.
+
+**In Docker** the scheduler and prompt jobs need nothing extra — they are part of the Libra process.
+Command jobs are different: the image ships `msb`, but a microVM needs hardware virtualization, so
+the container must be given the hypervisor device:
+
+```yaml
+services:
+  libra:
+    devices:
+      - /dev/kvm:/dev/kvm        # Linux Docker Engine only
+    volumes:
+      - microsandbox-data:/root/.microsandbox   # cached images survive restarts
+```
+
+Check what a container can actually do with `docker compose exec libra /opt/microsandbox/bin/msb
+doctor` — it reports the KVM device explicitly. Docker Desktop on macOS usually does not expose
+`/dev/kvm` to its Linux VM at all, and nesting a microVM inside a VM is slow even when it works, so
+on a Mac prefer running Libra with `cargo run` (microsandbox uses Apple's own Virtualization
+Framework there). If a command job cannot start its VM, the run log says so
+(`sandbox process exited (signal: 6 …)`) rather than pretending the job ran.
+
 ### Securing it
 
 Out of the box Libra has no accounts and no login: it trusts whoever can reach the port. Two env
@@ -177,6 +214,10 @@ multi-user auth in front of it with a reverse proxy.
 | `GET /api/discover?topic=tech\|finance\|art\|sports\|entertainment` | recent news for that topic; a story opens a thread that summarises its URL |
 | `POST /api/generate/image` | `{prompt}` → base64 image (needs an image model) |
 | `GET /api/stocks/{symbol}` | chart series for the stocks widget |
+| `GET /api/jobs` · `POST /api/jobs` | list / create an Automator job `{name, kind: command\|prompt, cron, timezone, image, command, prompt, memory, max_duration_secs, notify_url, enabled}` — 5-field cron, normalized on save |
+| `GET /api/jobs/{id}` · `PUT /api/jobs/{id}` · `DELETE /api/jobs/{id}` | read / replace / remove a job |
+| `POST /api/jobs/{id}/run` | start it now, outside its schedule |
+| `GET /api/jobs/{id}/runs?limit=20` | run history: status, exit code, stdout, stderr, and `chat_id` for prompt jobs |
 | `GET /api/settings` · `PUT /api/settings` | read / patch the whole config, applied hot |
 | `GET /api/models` · `GET /api/health` | model ids · status + redis + providers |
 
@@ -208,6 +249,7 @@ src/
   search/            provider trait + 7 providers + fallback router with Redis cache
   pipeline/          ask(): classify → widgets → plan → rounds → filter → rerank → read pages → answer (or report) → suggestions
   fetch.rs           read cited pages with Obscura, or a plain HTTP fetch when it is not installed
+  automator/         cron schedules, the msb call that starts one microVM per run, run history, webhooks
   uploads/           text/pdf/docx/image extraction, chunking, embedding, cosine retrieval
   widgets/           calculator, currency (ECB rates), time, weather (Open-Meteo), stocks (Nasdaq)
   prompts/           every LLM prompt; all of them return strict JSON
@@ -247,6 +289,8 @@ representative rather than real.
 - **A discussion report is one pass per section.** The sections do not see each other's prose, only the outline, so a report reads as six good paragraphs rather than one argued piece. It also costs 4–6 answer-model calls instead of one.
 - **A stuck reasoner is cut off, not fixed.** If the answer model repeats itself while thinking, the stream is stopped after a few cycles and the turn reports it — an endless trace used to burn the whole context and save an empty answer. The light-model calls (plan, filter, rerank) are bounded by a token cap instead, so a loop there costs one slow round and falls back.
 - **Embedding search is brute-force cosine** over SQLite BLOBs. Fine up to a few thousand chunks.
+- **Command jobs only run where `msb` does.** microsandbox is beta: it needs KVM on Linux and Apple Silicon on macOS, so a container running Libra wants `/dev/kvm` passed through to schedule anything. Without the binary a job records an error run that says so, rather than pretending it ran.
+- **The scheduler is a 20-second sweep**, not a realtime timer: a job fires within a tick of its minute, and a restart can delay one — missed runs are not caught up.
 
 ## Acknowledgements
 

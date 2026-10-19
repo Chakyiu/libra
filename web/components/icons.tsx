@@ -103,3 +103,11 @@ export const FlameIcon = icon(
   { size: 17 },
 );
 export const CodeIcon = icon(<path d="m9 8-5 4 5 4M15 8l5 4-5 4" />, { size: 17, stroke: 1.7 });
+/** A stopwatch: the Automator's schedules. */
+export const TimerIcon = icon(
+  <>
+    <circle cx="12" cy="13.5" r="7.5" />
+    <path d="M12 10v3.5l2.4 1.7M9.5 3.5h5M12 3.5V6" />
+  </>,
+  { size: 17 },
+);

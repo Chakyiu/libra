@@ -1,5 +1,6 @@
 //! HTTP surface: JSON in, SSE out. One endpoint per frontend feature.
 
+use crate::db::Job;
 use crate::error::{LibraError, LibraResult};
 use crate::pipeline::{AskRequest, GeoFix};
 use crate::search::types::{SearchKind, SearchQuery};
@@ -39,6 +40,14 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/discover", get(discover))
         .route("/generate/image", post(generate_image))
         .route("/stocks/{symbol}", get(stock_chart))
+        // The Automator's schedules: CRUD, run now, and run history.
+        .route("/jobs", get(list_jobs).post(create_job))
+        .route(
+            "/jobs/{id}",
+            get(get_job).put(update_job).delete(delete_job),
+        )
+        .route("/jobs/{id}/run", post(run_job))
+        .route("/jobs/{id}/runs", get(list_job_runs))
         .with_state(app.clone())
         .layer(axum::middleware::from_fn_with_state(
             app.clone(),
@@ -429,6 +438,143 @@ async fn generate_image(
     let cfg = app.settings.get();
     let v = crate::media::generate(&app.http, &cfg, &b.prompt).await?;
     Ok(Json(v))
+}
+
+// ------------------------------------------------------------------ automator
+
+#[derive(Deserialize)]
+struct RunsQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+async fn list_jobs(State(app): State<Arc<App>>) -> LibraResult<Json<Value>> {
+    Ok(Json(json!(app.db.list_jobs().await?)))
+}
+
+async fn get_job(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<Json<Value>> {
+    let job = app
+        .db
+        .get_job(&id)
+        .await?
+        .ok_or_else(|| LibraError::NotFound(format!("job {id}")))?;
+    Ok(Json(json!(job)))
+}
+
+async fn create_job(
+    State(app): State<Arc<App>>,
+    Json(body): Json<Job>,
+) -> LibraResult<Json<Value>> {
+    let job = checked_job(&app, body, None)?;
+    app.db.save_job(&job).await?;
+    Ok(Json(json!(job)))
+}
+
+async fn update_job(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Json(body): Json<Job>,
+) -> LibraResult<Json<Value>> {
+    let existing = app
+        .db
+        .get_job(&id)
+        .await?
+        .ok_or_else(|| LibraError::NotFound(format!("job {id}")))?;
+    let job = checked_job(&app, body, Some(&existing))?;
+    app.db.save_job(&job).await?;
+    Ok(Json(json!(job)))
+}
+
+async fn delete_job(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+) -> LibraResult<StatusCode> {
+    if !app.db.delete_job(&id).await? {
+        return Err(LibraError::NotFound(format!("job {id}")));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Start a job outside its schedule. The run lands in the same history as a timed one.
+async fn run_job(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<Json<Value>> {
+    let job = app
+        .db
+        .get_job(&id)
+        .await?
+        .ok_or_else(|| LibraError::NotFound(format!("job {id}")))?;
+    let run_id = crate::automator::run_now(&app, &job).await?;
+    Ok(Json(json!({ "runId": run_id })))
+}
+
+async fn list_job_runs(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<RunsQuery>,
+) -> LibraResult<Json<Value>> {
+    let limit = q.limit.unwrap_or(20).clamp(1, 100);
+    Ok(Json(json!(app.db.list_job_runs(&id, limit).await?)))
+}
+
+/// Fill in what the form leaves out, and refuse a job that could never run — a typo in
+/// the schedule should be a 400, not a silent never-fires.
+fn checked_job(app: &Arc<App>, body: Job, existing: Option<&Job>) -> LibraResult<Job> {
+    let cfg = app.settings.get();
+    let id = if !body.id.trim().is_empty() {
+        body.id.trim().to_string()
+    } else {
+        existing
+            .map(|j| j.id.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    };
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return Err(LibraError::BadRequest("a job needs a name".into()));
+    }
+    if !matches!(body.kind.as_str(), "command" | "prompt") {
+        return Err(LibraError::BadRequest(
+            "kind is either command or prompt".into(),
+        ));
+    }
+    let (what, needs) = if body.kind == "prompt" {
+        (&body.prompt, "a prompt job needs a question")
+    } else {
+        (&body.command, "a command job needs something to run")
+    };
+    if what.trim().is_empty() {
+        return Err(LibraError::BadRequest(needs.into()));
+    }
+    let timezone = body.timezone.trim().to_string();
+    if !timezone.is_empty() && timezone.parse::<chrono_tz::Tz>().is_err() {
+        return Err(LibraError::BadRequest(format!(
+            "'{timezone}' is not a timezone I recognise — try 'Europe/London', or leave it blank for the server's own"
+        )));
+    }
+    let cron = crate::automator::normalize_cron(&body.cron)?;
+    let next_run_at = crate::automator::next_run(&cron, &timezone, chrono::Utc::now())
+        .ok_or_else(|| LibraError::BadRequest(format!("'{cron}' never fires")))?;
+    Ok(Job {
+        id,
+        name,
+        kind: body.kind.clone(),
+        cron,
+        timezone,
+        enabled: body.enabled,
+        image: body.image.trim().to_string(),
+        command: body.command.clone(),
+        prompt: body.prompt.clone(),
+        memory: body.memory.trim().to_string(),
+        // A schedule may not hold the machine hostage; microsandbox caps the VM anyway.
+        max_duration_secs: body.max_duration_secs.clamp(10, 3600),
+        notify_url: body.notify_url.trim().to_string(),
+        // Editing a job must not reset its history or pretend it is new.
+        created_at: existing
+            .map(|j| j.created_at.clone())
+            .filter(|c| !c.is_empty())
+            .unwrap_or_else(|| cfg.now()),
+        next_run_at,
+        last_run_at: existing.map(|j| j.last_run_at.clone()).unwrap_or_default(),
+        last_status: existing.map(|j| j.last_status.clone()).unwrap_or_default(),
+    })
 }
 
 #[cfg(test)]

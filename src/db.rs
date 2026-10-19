@@ -8,7 +8,8 @@ use sqlx::Row;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
     CREATE TABLE IF NOT EXISTS chats (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -49,7 +50,40 @@ const MIGRATIONS: &[&str] = &[r#"
       embedding BLOB
     );
     CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);
-    "#];
+    "#,
+    r#"
+    CREATE TABLE IF NOT EXISTS jobs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'command',
+      cron TEXT NOT NULL DEFAULT '',
+      timezone TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      image TEXT NOT NULL DEFAULT 'alpine',
+      command TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      memory TEXT NOT NULL DEFAULT '256M',
+      max_duration_secs INTEGER NOT NULL DEFAULT 300,
+      notify_url TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      next_run_at TEXT NOT NULL DEFAULT '',
+      last_run_at TEXT NOT NULL DEFAULT '',
+      last_status TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS job_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      started_at TEXT NOT NULL,
+      finished_at TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'running',
+      exit_code INTEGER,
+      output TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_runs ON job_runs(job_id, id DESC);
+    "#,
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chat {
@@ -103,6 +137,77 @@ pub struct ChunkRow {
     pub embedding: Vec<f32>,
 }
 
+/// A scheduled job the Automator owns. `cron` is stored normalized (seconds first);
+/// `timezone` is an IANA name, empty meaning the server's own local zone.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Job {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// "command": one shell line inside a throwaway microVM. "prompt": a question run
+    /// through the answer pipeline, so each run lands as a thread in the sidebar.
+    #[serde(default = "command_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub cron: String,
+    #[serde(default)]
+    pub timezone: String,
+    #[serde(default = "on")]
+    pub enabled: bool,
+    #[serde(default = "default_image")]
+    pub image: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default = "default_memory")]
+    pub memory: String,
+    #[serde(default = "default_duration")]
+    pub max_duration_secs: i64,
+    /// Webhook POSTed after every run — an ntfy topic, a Slack-compatible hook, your own.
+    #[serde(default)]
+    pub notify_url: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub next_run_at: String,
+    #[serde(default)]
+    pub last_run_at: String,
+    #[serde(default)]
+    pub last_status: String,
+}
+
+fn command_kind() -> String {
+    "command".into()
+}
+fn on() -> bool {
+    true
+}
+fn default_image() -> String {
+    "alpine".into()
+}
+fn default_memory() -> String {
+    "256M".into()
+}
+fn default_duration() -> i64 {
+    300
+}
+
+/// One execution of a job. `chat_id` is set for prompt jobs, output is capped.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobRun {
+    pub id: i64,
+    pub job_id: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub status: String,
+    pub exit_code: Option<i64>,
+    pub output: String,
+    pub detail: String,
+    pub chat_id: String,
+}
+
 #[derive(Clone)]
 pub struct Db {
     pool: SqlitePool,
@@ -146,6 +251,10 @@ impl Db {
         )
         .execute(&pool)
         .await?;
+        // Same for a job run whose microVM or answer died with the previous process.
+        sqlx::query("UPDATE job_runs SET status = 'stopped' WHERE status = 'running'")
+            .execute(&pool)
+            .await?;
         Ok(Self {
             pool,
             path: path.to_string(),
@@ -562,6 +671,189 @@ impl Db {
                 embedding: decode_embedding(&r.get::<Vec<u8>, _>("embedding")),
             })
             .collect())
+    }
+
+    // ------------------------------------------------------------- automator
+
+    pub async fn list_jobs(&self) -> anyhow::Result<Vec<Job>> {
+        let rows = sqlx::query(JOB_SELECT).fetch_all(&self.pool).await?;
+        Ok(rows.iter().map(job_from_row).collect())
+    }
+
+    pub async fn get_job(&self, id: &str) -> anyhow::Result<Option<Job>> {
+        let row = sqlx::query(&format!("{JOB_SELECT} WHERE id = ?"))
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(job_from_row))
+    }
+
+    /// Jobs whose computed next run has come due. UTC stamps sort as text, so `<=` works.
+    pub async fn due_jobs(&self, now: &str) -> anyhow::Result<Vec<Job>> {
+        let rows = sqlx::query(&format!(
+            "{JOB_SELECT} WHERE enabled = 1 AND next_run_at != '' AND next_run_at <= ? ORDER BY next_run_at"
+        ))
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(job_from_row).collect())
+    }
+
+    pub async fn save_job(&self, j: &Job) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"INSERT INTO jobs (id, name, kind, cron, timezone, enabled, image, command, prompt,
+                                 memory, max_duration_secs, notify_url, created_at, next_run_at, last_run_at, last_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, kind = excluded.kind,
+                 cron = excluded.cron, timezone = excluded.timezone, enabled = excluded.enabled,
+                 image = excluded.image, command = excluded.command, prompt = excluded.prompt,
+                 memory = excluded.memory, max_duration_secs = excluded.max_duration_secs,
+                 notify_url = excluded.notify_url, next_run_at = excluded.next_run_at,
+                 last_run_at = excluded.last_run_at, last_status = excluded.last_status"#,
+        )
+        .bind(&j.id)
+        .bind(&j.name)
+        .bind(&j.kind)
+        .bind(&j.cron)
+        .bind(&j.timezone)
+        .bind(j.enabled)
+        .bind(&j.image)
+        .bind(&j.command)
+        .bind(&j.prompt)
+        .bind(&j.memory)
+        .bind(j.max_duration_secs)
+        .bind(&j.notify_url)
+        .bind(&j.created_at)
+        .bind(&j.next_run_at)
+        .bind(&j.last_run_at)
+        .bind(&j.last_status)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_job(&self, id: &str) -> anyhow::Result<bool> {
+        let res = sqlx::query("DELETE FROM jobs WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// Record the next due time (and, for a firing job, the previous one + its state).
+    pub async fn bump_job(
+        &self,
+        id: &str,
+        next_run_at: &str,
+        last_run_at: &str,
+        status: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE jobs SET next_run_at = ?, last_run_at = ?, last_status = ? WHERE id = ?",
+        )
+        .bind(next_run_at)
+        .bind(last_run_at)
+        .bind(status)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn start_job_run(&self, job_id: &str, started_at: &str) -> anyhow::Result<i64> {
+        let res = sqlx::query("INSERT INTO job_runs (job_id, started_at) VALUES (?, ?)")
+            .bind(job_id)
+            .bind(started_at)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.last_insert_rowid())
+    }
+
+    /// Close a run row, mirror its state onto the job, and keep only the newest `KEEP_RUNS`.
+    pub async fn finish_job_run(&self, run: &JobRun) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE job_runs SET finished_at = ?, status = ?, exit_code = ?, output = ?, detail = ?, chat_id = ?
+             WHERE id = ?",
+        )
+        .bind(&run.finished_at)
+        .bind(&run.status)
+        .bind(run.exit_code)
+        .bind(&run.output)
+        .bind(&run.detail)
+        .bind(&run.chat_id)
+        .bind(run.id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE jobs SET last_status = ? WHERE id = ?")
+            .bind(&run.status)
+            .bind(&run.job_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM job_runs WHERE job_id = ? AND id NOT IN
+                (SELECT id FROM job_runs WHERE job_id = ? ORDER BY id DESC LIMIT ?)",
+        )
+        .bind(&run.job_id)
+        .bind(&run.job_id)
+        .bind(JOB_RUN_HISTORY)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn list_job_runs(&self, job_id: &str, limit: i64) -> anyhow::Result<Vec<JobRun>> {
+        let rows = sqlx::query(
+            "SELECT id, job_id, started_at, finished_at, status, exit_code, output, detail, chat_id
+             FROM job_runs WHERE job_id = ? ORDER BY id DESC LIMIT ?",
+        )
+        .bind(job_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| JobRun {
+                id: r.get("id"),
+                job_id: r.get("job_id"),
+                started_at: r.get("started_at"),
+                finished_at: r.get("finished_at"),
+                status: r.get("status"),
+                exit_code: r.get("exit_code"),
+                output: r.get("output"),
+                detail: r.get("detail"),
+                chat_id: r.get("chat_id"),
+            })
+            .collect())
+    }
+}
+
+const JOB_SELECT: &str = "SELECT id, name, kind, cron, timezone, enabled, image, command, prompt,
+                          memory, max_duration_secs, notify_url, created_at, next_run_at,
+                          last_run_at, last_status FROM jobs";
+
+/// How much run history to keep per job — enough to see a weekly job fail twice.
+const JOB_RUN_HISTORY: i64 = 20;
+
+fn job_from_row(r: &sqlx::sqlite::SqliteRow) -> Job {
+    Job {
+        id: r.get("id"),
+        name: r.get("name"),
+        kind: r.get("kind"),
+        cron: r.get("cron"),
+        timezone: r.get("timezone"),
+        enabled: r.get::<i64, _>("enabled") != 0,
+        image: r.get("image"),
+        command: r.get("command"),
+        prompt: r.get("prompt"),
+        memory: r.get("memory"),
+        max_duration_secs: r.get("max_duration_secs"),
+        notify_url: r.get("notify_url"),
+        created_at: r.get("created_at"),
+        next_run_at: r.get("next_run_at"),
+        last_run_at: r.get("last_run_at"),
+        last_status: r.get("last_status"),
     }
 }
 

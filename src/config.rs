@@ -91,6 +91,10 @@ pub struct Config {
     pub search_cache_ttl_secs: u64,
     pub max_upload_mb: usize,
 
+    /// The microsandbox CLI the Automator shells out to (`msb run …`) for scheduled
+    /// sandbox jobs. Env-only: the API never returns it. Jobs only need it on PATH.
+    pub msb_bin: String,
+
     /// Bearer token every `/api` request must carry. Empty means the API is open — only
     /// sensible on a trusted network or behind a proxy that authenticates. Env-only:
     /// it is never read from settings.json and never returned by GET /api/settings.
@@ -221,6 +225,7 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(25),
+            msb_bin: std::env::var("MSB_BIN").unwrap_or_else(|_| "msb".into()),
             auth_token: std::env::var("LIBRA_AUTH_TOKEN")
                 .unwrap_or_default()
                 .trim()

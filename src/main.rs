@@ -1,4 +1,5 @@
 mod api;
+mod automator;
 mod blocks;
 mod cache;
 mod config;
@@ -41,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
 
     let settings = crate::config::SettingsHandle::new(cfg.clone());
     let app = Arc::new(App::new(settings, db, cache)?);
+    crate::automator::spawn(&app);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     let listener = tokio::net::TcpListener::bind(addr.as_str()).await?;

@@ -77,3 +77,90 @@
   .news__lead .news__title { font-size: calc(22 / 15 * 1rem); }
   .news__grid { grid-template-columns: 1fr; }
 }
+
+/* ─── automator ───────────────────────────────────────────────── */
+
+.jobs__bar { display: flex; gap: 8px; margin: 0 0 20px; }
+
+.jobform {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  padding: 18px 20px 0;
+  margin: 0 0 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.jobform__wide { margin: 0; }
+.jobform .savebar { position: static; padding: 12px 0; }
+
+.jobs { display: flex; flex-direction: column; }
+.job {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 18px;
+  align-items: center;
+  padding: 13px 0;
+  border-top: 1px solid var(--border);
+}
+.job:last-child { border-bottom: 1px solid var(--border); }
+.job__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.job__name {
+  font-family: var(--font-display);
+  font-size: calc(16.5 / 15 * 1rem);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.job__when {
+  grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+  font-size: calc(12.5 / 15 * 1rem);
+  color: var(--muted);
+}
+.job__when code { font-family: var(--font-mono); font-size: calc(12 / 15 * 1rem); color: var(--fg); }
+.job__actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.runs { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 4px; }
+.runs h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: calc(17.5 / 15 * 1rem);
+  letter-spacing: -0.01em;
+  margin: 12px 0 2px;
+}
+.run { border-top: 1px dashed var(--border); padding: 10px 0; }
+.run__head { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: baseline; margin: 0; }
+.run__head b { font-size: calc(13.5 / 15 * 1rem); color: var(--fg); }
+.run__out {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: calc(12 / 15 * 1rem);
+  line-height: 1.55;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 10px 12px;
+  margin: 8px 0 0;
+  max-height: 20rem;
+  overflow: auto;
+}
+.run__out.is-error { border-left: 2px solid var(--accent); }
+
+.field-label input.is-mono,
+.field-label select,
+.field-label textarea { font-family: var(--font-mono); }

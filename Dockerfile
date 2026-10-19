@@ -34,6 +34,17 @@ RUN set -eu; \
     test -x /usr/local/bin/obscura; \
     rm -f /tmp/obscura.tar.gz
 WORKDIR /app
+# microsandbox: the Automator's command jobs start one disposable microVM per run through
+# this CLI. Needs /dev/kvm from the environment at runtime (see docker-compose.yml) —
+# without it those jobs record an error run, and prompt jobs are unaffected. The CLI and
+# libkrunfw land under /opt/microsandbox; msb's own image cache stays in /root/.microsandbox,
+# which is a volume, not a build layer. Upstream's script has no version flag: it takes the
+# latest release.
+RUN set -eu; \
+    curl -fsSL https://install.microsandbox.dev -o /tmp/msb-install.sh; \
+    MSB_HOME=/opt/microsandbox sh /tmp/msb-install.sh; \
+    rm -f /tmp/msb-install.sh; \
+    /opt/microsandbox/bin/msb --version
 COPY --from=build /app/target/release/libra /usr/local/bin/libra
 COPY --from=web /app/web/out /app/web/out
 
@@ -42,6 +53,7 @@ ENV PORT=3001 \
     LIBRA_STATIC_DIR=/app/web/out \
     DATABASE_URL=/data/libra.db \
     OBSCURA_BIN=/usr/local/bin/obscura \
+    MSB_BIN=/opt/microsandbox/bin/msb \
     RUST_LOG=info
 VOLUME /data
 EXPOSE 3001

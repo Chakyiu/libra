@@ -16,6 +16,14 @@ services:
       # Model providers are added in Settings → Model providers, not here.
     volumes:
       - libra-data:/data
+      # msb keeps its guest images and sandbox state here; without a volume every job
+      # run re-downloads its image.
+      - microsandbox-data:/root/.microsandbox
+    # Command jobs boot a microVM, so the container needs the hypervisor device. Linux
+    # Docker Engine passes it straight through; Docker Desktop's Linux VM often does not
+    # expose /dev/kvm at all. Check with: docker compose exec libra msb doctor
+    # devices:
+    #   - /dev/kvm:/dev/kvm
     depends_on:
       - redis
       - searxng
@@ -40,4 +48,5 @@ services:
 
 volumes:
   libra-data:
+  microsandbox-data:
   redis-data:
