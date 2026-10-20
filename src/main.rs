@@ -9,6 +9,7 @@ mod error;
 mod fetch;
 mod llm;
 mod media;
+mod notify;
 mod pipeline;
 mod prompts;
 mod search;

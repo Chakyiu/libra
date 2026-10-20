@@ -30,7 +30,7 @@ pub enum LibraError {
     NotFound(String),
     #[error("no model configured: {0}")]
     NoModel(String),
-    #[error("{provider} search/provider error: {message}")]
+    #[error("{provider} error: {message}")]
     Provider { provider: String, message: String },
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),

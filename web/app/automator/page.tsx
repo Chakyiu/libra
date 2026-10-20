@@ -413,6 +413,9 @@ function JobForm({
           <input type="url" value={draft.notify_url} onChange={(e) => set({ notify_url: e.target.value })} placeholder="https://ntfy.sh/your-topic" />
         </label>
       </div>
+      <p className="meta jobform__note">
+        A finished run also posts to the Telegram chat set in <a href="/settings/?tab=notifications">Settings → Notifications</a>.
+      </p>
 
       <div className="savebar">
         <button className="btn btn--primary" type="button" onClick={onSave}>

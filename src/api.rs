@@ -50,6 +50,9 @@ pub fn router(app: Arc<App>) -> Router {
         )
         .route("/jobs/{id}/run", post(run_job))
         .route("/jobs/{id}/runs", get(list_job_runs))
+        // Telegram setup: find the chat ID, then prove the bot can post to it.
+        .route("/notifications/telegram/chats", post(telegram_chats))
+        .route("/notifications/telegram/test", post(telegram_test))
         .with_state(app.clone())
         .layer(axum::middleware::from_fn_with_state(
             app.clone(),
@@ -471,6 +474,56 @@ async fn job_from_text(
     Ok(Json(
         json!({ "job": job, "why": plan.why, "notes": plan.notes }),
     ))
+}
+
+/// What the Settings form sends for both Telegram helpers: either value may be blank, in
+/// which case the saved one is used, so saving the token once is enough.
+#[derive(Deserialize)]
+struct TelegramBody {
+    #[serde(default)]
+    bot_token: String,
+    #[serde(default)]
+    chat_id: String,
+}
+
+fn choose(sent: &str, saved: &str) -> String {
+    let sent = sent.trim();
+    if sent.is_empty() {
+        saved.trim().to_string()
+    } else {
+        sent.to_string()
+    }
+}
+
+/// The chats that have written to this bot, newest first. Telegram gives no way to look a
+/// chat ID up by hand, so the form asks the bot instead.
+async fn telegram_chats(
+    State(app): State<Arc<App>>,
+    Json(body): Json<TelegramBody>,
+) -> LibraResult<Json<Value>> {
+    let cfg = app.settings.get();
+    let token = choose(&body.bot_token, &cfg.telegram_bot_token);
+    let chats = crate::notify::chats(&app.http, &cfg.telegram_api_url, &token).await?;
+    Ok(Json(json!({ "chats": chats })))
+}
+
+/// One message to the chat, so a saved token is known to work before a job depends on it.
+async fn telegram_test(
+    State(app): State<Arc<App>>,
+    Json(body): Json<TelegramBody>,
+) -> LibraResult<Json<Value>> {
+    let cfg = app.settings.get();
+    let token = choose(&body.bot_token, &cfg.telegram_bot_token);
+    let chat = choose(&body.chat_id, &cfg.telegram_chat_id);
+    crate::notify::send(
+        &app.http,
+        &cfg.telegram_api_url,
+        &token,
+        &chat,
+        "Libra can reach you here.",
+    )
+    .await?;
+    Ok(Json(json!({ "sent": true })))
 }
 
 async fn get_job(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<Json<Value>> {

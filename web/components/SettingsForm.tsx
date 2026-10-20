@@ -10,13 +10,14 @@ import { Chat, Provider, Settings, api, deleteChat, putJson } from "@/lib/api";
 import { modelLabel, plural } from "@/lib/format";
 import { LEADING_MAX, LEADING_MIN, PREF_DEFAULTS, SIZE_MAX, SIZE_MIN, setPref, usePref } from "@/lib/prefs";
 
-type Tab = "search" | "answering" | "providers" | "appearance" | "data";
+type Tab = "search" | "answering" | "providers" | "appearance" | "notifications" | "data";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "search", label: "Search & sources" },
   { id: "answering", label: "Answering" },
   { id: "providers", label: "Model providers" },
   { id: "appearance", label: "Reading & appearance" },
+  { id: "notifications", label: "Notifications" },
   { id: "data", label: "Threads & data" },
 ];
 
@@ -793,6 +794,113 @@ function AppearancePanel() {
   );
 }
 
+/** Telegram for the whole instance: what to tell, where to tell it, and whether the bot can reach that chat. */
+function NotificationsPanel({ s, set }: { s: Settings; set: SetField }) {
+  const [found, setFound] = useState<{ id: string; title: string }[]>([]);
+  const [busy, setBusy] = useState<"" | "find" | "test">("");
+  const [note, setNote] = useState<{ text: string; error?: boolean } | null>(null);
+  const token = s.telegramBotToken ?? "";
+  const chat = s.telegramChatId ?? "";
+  const policy: "every" | "failure" = s.notifyRuns === "failure" ? "failure" : "every";
+
+  const post = <T = any,>(path: string, body: unknown) =>
+    api<T>(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  // Telegram will not tell you a chat ID, so the bot reads back the messages it has been sent instead.
+  async function findChats() {
+    setBusy("find");
+    setNote(null);
+    setFound([]);
+    try {
+      const r = await post<{ chats: { id: string; title: string }[] }>("/api/notifications/telegram/chats", { bot_token: token });
+      setFound(r.chats);
+      if (!r.chats.length) setNote({ text: "The bot has not seen a message yet. Send it anything in Telegram — /start is enough — then look again." });
+    } catch (e: any) {
+      setNote({ text: e.message, error: true });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function sendTest() {
+    setBusy("test");
+    setNote(null);
+    try {
+      await post("/api/notifications/telegram/test", { bot_token: token, chat_id: chat });
+      setNote({ text: "Sent. It should read “Libra can reach you here.” in Telegram." });
+    } catch (e: any) {
+      setNote({ text: e.message, error: true });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <>
+      <header>
+        <p className="kicker">{token && chat ? `Telegram · ${policy === "every" ? "every finished run" : "only runs that fail"}` : "Telegram not set up"}</p>
+        <h2>Notifications</h2>
+        <p>When a scheduled job finishes, Libra can tell you how it went. A job keeps its own webhook on the Automator screen; Telegram here covers every job on this instance at once.</p>
+      </header>
+
+      <Row label="Bot token" help="A token from @BotFather. It is only used to call Telegram’s Bot API from this host.">
+        <input type="password" value={token} onChange={(e) => set("telegramBotToken", e.target.value)} placeholder="123456789:AA…" autoComplete="off" aria-label="Telegram bot token" />
+      </Row>
+
+      <Row label="Chat to notify" help="A person, group or channel. Add the bot to a group or channel first, or Telegram will not let it post there.">
+        <div className="srow__stack">
+          <input type="text" className="is-mono" value={chat} onChange={(e) => set("telegramChatId", e.target.value)} placeholder="-1001234567890" aria-label="Telegram chat ID" />
+          <div className="srow__control">
+            <button type="button" className="btn" onClick={findChats} disabled={busy === "find" || !token}>
+              {busy === "find" ? "Looking…" : "Find my chat ID"}
+            </button>
+            <button type="button" className="btn" onClick={sendTest} disabled={busy === "test" || !token || !chat}>
+              {busy === "test" ? "Sending…" : "Send a test"}
+            </button>
+          </div>
+        </div>
+      </Row>
+
+      {!!found.length && (
+        <div className="srow">
+          <div>
+            <p className="srow__label">Chats this bot has seen</p>
+            <p className="srow__help">Pick the one to post to. Nothing is saved until you save settings.</p>
+          </div>
+          <div className="srow__control">
+            <div className="srow__stack">
+              {found.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="btn btn--quiet"
+                  onClick={() => {
+                    set("telegramChatId", c.id);
+                    setFound([]);
+                    setNote({ text: `${c.title || c.id} is in the box above — press Save changes to keep it.` });
+                  }}
+                >
+                  {c.title || "unnamed"} · {c.id}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {note && (
+        <div className={`callout${note.error ? " callout--error" : ""}`} role="status">
+          {note.text}
+        </div>
+      )}
+
+      <Row label="Which runs" help="A bad run is one that timed out, failed to start, or ended with a non-zero exit." last>
+        <Seg value={policy} options={[{ value: "every", label: "Every run" }, { value: "failure", label: "Only failures" }]} onChange={(v) => set("notifyRuns", v)} label="Which runs send a Telegram message" />
+      </Row>
+    </>
+  );
+}
+
 function DataPanel() {
   const { chats, reload } = useThreads();
   const { health } = useInstance();
@@ -979,6 +1087,7 @@ export default function SettingsForm() {
               {tab === "answering" && draft && <AnsweringPanel s={draft} set={set} onAddProvider={() => choose("providers")} />}
               {tab === "providers" && draft && <ProvidersPanel providers={draft.providers} onChange={setProviders} />}
               {tab === "appearance" && <AppearancePanel />}
+              {tab === "notifications" && draft && <NotificationsPanel s={draft} set={set} />}
               {tab === "data" && <DataPanel />}
             </section>
 

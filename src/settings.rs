@@ -76,6 +76,11 @@ fn validate(cfg: &Config, db_path: &Path) -> Result<(), LibraError> {
             "defaultTemperature must be between 0 and 2".into(),
         ));
     }
+    if !matches!(cfg.notify_runs.as_str(), "every" | "failure") {
+        return Err(LibraError::BadRequest(
+            "notifyRuns is either 'every' or 'failure'".into(),
+        ));
+    }
     for kind in [
         crate::search::types::SearchKind::Web,
         crate::search::types::SearchKind::News,

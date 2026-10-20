@@ -91,9 +91,19 @@ pub struct Config {
     pub search_cache_ttl_secs: u64,
     pub max_upload_mb: usize,
 
+    /// Telegram, where the Automator announces a finished run: a bot token from
+    /// @BotFather, the chat to post to, and whether every run posts or only a bad one.
+    pub telegram_bot_token: String,
+    pub telegram_chat_id: String,
+    /// `"every"` or `"failure"`.
+    pub notify_runs: String,
+
     /// The microsandbox CLI the Automator shells out to (`msb run …`) for scheduled
     /// sandbox jobs. Env-only: the API never returns it. Jobs only need it on PATH.
     pub msb_bin: String,
+    /// Telegram Bot API base. Env-only (`TELEGRAM_API_URL`): point it at a self-hosted
+    /// Bot API server or a relay when the instance cannot reach api.telegram.org.
+    pub telegram_api_url: String,
 
     /// Bearer token every `/api` request must carry. Empty means the API is open — only
     /// sensible on a trusted network or behind a proxy that authenticates. Env-only:
@@ -225,7 +235,12 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(25),
+            telegram_bot_token: String::new(),
+            telegram_chat_id: String::new(),
+            notify_runs: "every".into(),
             msb_bin: std::env::var("MSB_BIN").unwrap_or_else(|_| "msb".into()),
+            telegram_api_url: std::env::var("TELEGRAM_API_URL")
+                .unwrap_or_else(|_| "https://api.telegram.org".into()),
             auth_token: std::env::var("LIBRA_AUTH_TOKEN")
                 .unwrap_or_default()
                 .trim()
@@ -300,6 +315,9 @@ impl Config {
             "enableReranker": self.enable_reranker,
             "imageGenerationEnabled": self.image_generation_enabled,
             "customInstructions": self.custom_instructions,
+            "telegramBotToken": self.telegram_bot_token,
+            "telegramChatId": self.telegram_chat_id,
+            "notifyRuns": self.notify_runs,
             "disabledWidgets": self.disabled_widgets,
             "enabledProviders": self.enabled_providers,
         })
@@ -378,6 +396,9 @@ impl Config {
         b!("enableReranker", self.enable_reranker);
         b!("imageGenerationEnabled", self.image_generation_enabled);
         s!("customInstructions", self.custom_instructions);
+        s!("telegramBotToken", self.telegram_bot_token);
+        s!("telegramChatId", self.telegram_chat_id);
+        s!("notifyRuns", self.notify_runs);
         list!("disabledWidgets", self.disabled_widgets);
         list!("enabledProviders", self.enabled_providers);
 
@@ -418,6 +439,12 @@ impl Config {
         }
         if let Ok(v) = std::env::var("FIRECRAWL_API_KEY") {
             self.firecrawl_api_key = v;
+        }
+        if let Ok(v) = std::env::var("TELEGRAM_BOT_TOKEN") {
+            self.telegram_bot_token = v;
+        }
+        if let Ok(v) = std::env::var("TELEGRAM_CHAT_ID") {
+            self.telegram_chat_id = v;
         }
         if std::env::var("OBSCURA_DISABLED").ok().as_deref() == Some("1") {
             self.read_pages = false;
@@ -560,6 +587,25 @@ mod tests {
         assert!(cfg.providers.is_empty());
         assert!(cfg.default_model.is_empty());
         assert!(cfg.resolve_model("ollama/llama3.1:8b").is_none());
+    }
+
+    #[test]
+    fn telegram_settings_live_in_the_settings_file() {
+        let mut cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
+        assert_eq!(cfg.notify_runs, "every");
+        cfg.apply_settings(&serde_json::json!({
+            "telegramBotToken": "123:secret",
+            "telegramChatId": "-1007",
+            "notifyRuns": "failure"
+        }));
+        let written = cfg.settings_json();
+        assert_eq!(written["telegramBotToken"], "123:secret");
+        assert_eq!(written["telegramChatId"], "-1007");
+        assert_eq!(written["notifyRuns"], "failure");
+        // A settings file that leaves them out must not wipe them either.
+        cfg.apply_settings(&serde_json::json!({ "readPages": false }));
+        assert_eq!(cfg.telegram_chat_id, "-1007");
+        assert_eq!(cfg.notify_runs, "failure");
     }
 
     #[test]

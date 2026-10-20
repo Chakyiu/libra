@@ -27,7 +27,7 @@ One binary serves the API and the pre-built UI.
 - **Answers that do things.** Calculator, currency conversion, world clock, weather (Open-Meteo) and stock quotes with charts (Nasdaq) render as blocks above the prose.
 - **Your files and your photos.** Upload `txt`, `md`, `csv`, `pdf`, `docx` or images; documents are chunked, embedded and retrieved by cosine similarity, images go to a vision model.
 - **Image and video results, a Discover feed** (tech, finance, art, sports, entertainment) that opens a thread summarising the story, and optional image generation.
-- **An Automator.** Cron jobs Libra runs for you: one shell line inside a throwaway [microsandbox](https://github.com/superradcompany/microsandbox) microVM, or a saved question whose answer is filed as a thread. Per-job timezone, run history, run-now, and an optional webhook when a run ends. Or say one sentence and the AI helper writes the job.
+- **An Automator.** Cron jobs Libra runs for you: one shell line inside a throwaway [microsandbox](https://github.com/superradcompany/microsandbox) microVM, or a saved question whose answer is filed as a thread. Per-job timezone, run history, run-now, and a message when a run ends — a webhook per job, or Telegram for the whole instance. Or say one sentence and the AI helper writes the job.
 - **Multilingual.** Ask in Chinese, get a Chinese answer and a Chinese thread title.
 - **Stops, survives, reloads.** Answers stream over SSE; reloading mid-answer restores the partial turn and keeps polling. Stopping keeps what was written. No accounts, no cookies, no telemetry.
 - **Optional access token.** Set one env var and every `/api` call needs it; cross-origin access is closed by default. See [Securing it](#securing-it).
@@ -153,6 +153,21 @@ Prompt jobs need no extra binary: they call the same answer pipeline the UI uses
 appears in the sidebar and the run links to it. A job's optional `notify_url` gets a JSON `POST`
 when a run ends — an ntfy topic works out of the box.
 
+**Telegram tells you about every run at once.** In **Settings → Notifications** put a bot token from
+[@BotFather](https://t.me/BotFather), send that bot `/start` once, press **Find my chat ID** — the bot
+reads back the chats that have messaged it, because Telegram gives no way to look a chat number up —
+and **Send a test** to prove it can post. Choose whether every finished run posts or only the ones that
+went wrong (a timeout, a sandbox that never started, a non-zero exit). The message names the job,
+the status, the exit code and the tail of the output. Keys can stay out of the settings file:
+
+```bash
+# TELEGRAM_BOT_TOKEN=123456789:AA…                  # or type it in Settings → Notifications
+# TELEGRAM_CHAT_ID=-1001234567890                   # groups and channels need the bot added first
+# TELEGRAM_API_URL=https://api.telegram.org         # a self-hosted Bot API server, if you run one
+```
+
+A notification that fails is a log line, never a failed run, and an unset token posts nothing.
+
 **You do not have to write the cron expression.** Type one sentence into the Automator — *every
 weekday morning at 8 London time, tell me what changed in the Rust release notes* — and its helper
 fills the form: name, kind, schedule, timezone, and what the job should ask or run. It uses the light
@@ -223,6 +238,8 @@ multi-user auth in front of it with a reverse proxy.
 | `GET /api/stocks/{symbol}` | chart series for the stocks widget |
 | `GET /api/jobs` · `POST /api/jobs` | list / create an Automator job `{name, kind: command\|prompt, cron, timezone, image, command, prompt, memory, max_duration_secs, notify_url, enabled}` — 5-field cron, normalized on save |
 | `POST /api/jobs/from-text` | the Automator helper: `{text}` (one sentence) → `{job, why, notes}` — the light model fills the job, `notes` lists what it guessed, and the job is saved |
+| `POST /api/notifications/telegram/chats` | `{bot_token}` → `{chats: [{id, title}]}` — the chats that have messaged this bot, newest first. A blank token uses the saved one |
+| `POST /api/notifications/telegram/test` | `{bot_token, chat_id}` → `{sent: true}` — one message to prove the bot can post there |
 | `GET /api/jobs/{id}` · `PUT /api/jobs/{id}` · `DELETE /api/jobs/{id}` | read / replace / remove a job |
 | `POST /api/jobs/{id}/run` | start it now, outside its schedule |
 | `GET /api/jobs/{id}/runs?limit=20` | run history: status, exit code, stdout, stderr, and `chat_id` for prompt jobs |
@@ -259,6 +276,7 @@ src/
   fetch.rs           read cited pages with Obscura, or a plain HTTP fetch when it is not installed
   automator/         cron schedules, the msb call that starts one microVM per run, run history, webhooks,
                      and a helper that turns one sentence into a saved job
+  notify.rs          Telegram Bot API: announce a finished run, list the chats that messaged the bot, test send
   uploads/           text/pdf/docx/image extraction, chunking, embedding, cosine retrieval
   widgets/           calculator, currency (ECB rates), time, weather (Open-Meteo), stocks (Nasdaq)
   prompts/           every LLM prompt; all of them return strict JSON

@@ -83,6 +83,8 @@
 /* One sentence to the helper, a saved job back. */
 .idea { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
 .idea__input { flex: 1 1 240px; }
+/* the one line under the job form's fields, pointing at the instance-wide notifier */
+.jobform__note { margin: 10px 0 0; }
 
 /* What the helper made, and what it wants checked. */
 .callout--made { border-left-color: var(--success); }

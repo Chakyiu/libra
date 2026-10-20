@@ -254,29 +254,38 @@ async fn run_prompt(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
 
 /// Optional webhook per job. The keys ntfy understands are first, so a topic URL works
 /// with no extra setup.
+/// What a finished run tells the outside world: the job's own webhook (an ntfy topic takes
+/// it directly), and the instance-wide Telegram chat from Settings when it is configured
+/// and the notification policy covers this run.
 async fn notify(app: &Arc<App>, job: &Job, run: &JobRun) {
-    let url = job.notify_url.trim();
-    if url.is_empty() {
-        return;
-    }
+    let cfg = app.settings.get();
     let body = if run.detail.trim().is_empty() {
         tail(&run.output)
     } else {
         run.detail.trim().to_string()
     };
-    let payload = json!({
-        "title": format!("Libra · {} · {}", job.name, run.status),
-        "body": body,
-        "job": job.name,
-        "kind": job.kind,
-        "status": run.status,
-        "exitCode": run.exit_code,
-        "startedAt": run.started_at,
-        "finishedAt": run.finished_at,
-        "chatId": run.chat_id,
-    });
-    if let Err(e) = app.http.post(url).json(&payload).send().await {
-        tracing::warn!("notification for '{}' failed: {e}", job.name);
+    let url = job.notify_url.trim();
+    if !url.is_empty() {
+        let payload = json!({
+            "title": format!("Libra · {} · {}", job.name, run.status),
+            "body": body,
+            "job": job.name,
+            "kind": job.kind,
+            "status": run.status,
+            "exitCode": run.exit_code,
+            "startedAt": run.started_at,
+            "finishedAt": run.finished_at,
+            "chatId": run.chat_id,
+        });
+        if let Err(e) = app.http.post(url).json(&payload).send().await {
+            tracing::warn!("notification for '{}' failed: {e}", job.name);
+        }
+    }
+    if !crate::notify::announces(&cfg.notify_runs, &run.status) {
+        return;
+    }
+    if let Err(e) = crate::notify::announce_run(&app.http, &cfg, job, run, &body).await {
+        tracing::warn!("telegram notification for '{}' failed: {e}", job.name);
     }
 }
 
