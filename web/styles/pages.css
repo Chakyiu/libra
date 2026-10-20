@@ -150,26 +150,21 @@
 .job__when code { font-family: var(--font-mono); font-size: calc(12 / 15 * 1rem); color: var(--fg); }
 .job__actions {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
   align-self: center;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.runs { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 4px; }
-.runs h3 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-display);
-  font-size: calc(17.5 / 15 * 1rem);
-  letter-spacing: -0.01em;
-  margin: 12px 0 2px;
-}
-.run { border-top: 1px dashed var(--border); padding: 10px 0; }
+/* The last run inside the card — what it printed is the reason the page exists, so it is
+   not hidden behind a click. Older runs and a long tail stay behind one quiet button each. */
+.job__runs { grid-column: 1; margin-top: 8px; }
+.job__runs .meta { font-size: calc(12 / 15 * 1rem); }
+.job__runbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.run { border-top: 1px dashed var(--border); padding: 9px 0; }
+.job__runs .run:first-child { border-top: 0; padding-top: 0; }
 .run__head { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: baseline; margin: 0; }
-.run__head b { font-size: calc(13.5 / 15 * 1rem); color: var(--fg); }
 .run__out {
   white-space: pre-wrap;
   word-break: break-word;
@@ -185,6 +180,9 @@
   overflow: auto;
 }
 .run__out.is-error { border-left: 2px solid var(--accent); }
+
+/* the quiet toggles under an inline run, smaller than a normal button */
+.btn--tiny { min-height: 26px; padding: 0 9px; font-size: calc(11.5 / 15 * 1rem); }
 
 .field-label input.is-mono,
 .field-label select,

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, PlusIcon, RerunIcon, SparkleIcon } from "@/components/icons";
+import { CloseIcon, PlusIcon, RerunIcon, SparkleIcon } from "@/components/icons";
 import { api, putJson } from "@/lib/api";
 import { askedAt, shortDate } from "@/lib/format";
 
@@ -41,6 +41,30 @@ type JobRun = {
 /** What the AI helper answers: the job it stored, plus how it read the request. */
 type Created = { job: Job; why: string; notes: string[] };
 
+/** Run rows kept per job on this page. */
+const HISTORY = 10;
+/** A run's stored output is up to 20k characters; a job card shows this much before asking. */
+const CUT = 700;
+
+const cut = (text: string) =>
+  text.length > CUT ? `${text.slice(0, CUT).trimEnd()}\n… ${text.length - CUT} characters not shown` : text;
+
+/**
+ * Run history for a list of jobs. A job whose runs cannot be read shows nothing rather than
+ * taking the whole page down with it.
+ */
+async function runsFor(jobs: Job[]): Promise<{ [jobId: string]: JobRun[] }> {
+  const pages = await Promise.all(
+    jobs.map((job) =>
+      api<JobRun[]>(`/api/jobs/${job.id}/runs?limit=${HISTORY}`).then(
+        (runs) => [job.id, runs] as const,
+        () => [job.id, []] as const,
+      ),
+    ),
+  );
+  return Object.fromEntries(pages);
+}
+
 const BLANK: Job = {
   id: "",
   name: "",
@@ -62,7 +86,7 @@ const BLANK: Job = {
 export default function Automator() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [draft, setDraft] = useState<Job | null>(null);
-  const [log, setLog] = useState<{ job: Job; runs: JobRun[] } | null>(null);
+  const [runs, setRuns] = useState<{ [jobId: string]: JobRun[] }>({});
   const [error, setError] = useState("");
   const [idea, setIdea] = useState("");
   const [making, setMaking] = useState(false);
@@ -70,7 +94,9 @@ export default function Automator() {
 
   const load = useCallback(async () => {
     try {
-      setJobs(await api<Job[]>("/api/jobs"));
+      const list = await api<Job[]>("/api/jobs");
+      setJobs(list);
+      setRuns(await runsFor(list));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -148,17 +174,7 @@ export default function Automator() {
     if (!window.confirm(`Delete “${job.name}”? Its run history goes with it.`)) return;
     try {
       await api(`/api/jobs/${job.id}`, { method: "DELETE" });
-      if (log?.job.id === job.id) setLog(null);
       await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  async function showLog(job: Job) {
-    if (log?.job.id === job.id) return setLog(null);
-    try {
-      setLog({ job, runs: await api<JobRun[]>(`/api/jobs/${job.id}/runs?limit=10`) });
     } catch (e) {
       setError((e as Error).message);
     }
@@ -277,20 +293,24 @@ export default function Automator() {
                     <code>{job.cron}</code>
                     <span>{job.timezone || "server time"}</span>
                     <span>next {when(job.next_run_at)}</span>
-                    {job.last_status && <span>last {job.last_status} · {when(job.last_run_at)}</span>}
                   </p>
+
+                  <RunLine runs={runs[job.id] || []} />
+
                   <div className="job__actions">
-                    <button className="btn btn--quiet btn--icon" type="button" title="Run now" onClick={() => run(job)}>
-                      <RerunIcon />
+                    <button
+                      className="btn btn--quiet"
+                      type="button"
+                      disabled={job.last_status === "running"}
+                      onClick={() => run(job)}
+                    >
+                      <RerunIcon /> {job.last_status === "running" ? "Running…" : "Run now"}
                     </button>
                     <button className="btn btn--quiet" type="button" aria-pressed={job.enabled} onClick={() => toggle(job)}>
                       {job.enabled ? "Pause" : "Resume"}
                     </button>
                     <button className="btn btn--quiet" type="button" onClick={() => setDraft({ ...job })}>
                       Edit
-                    </button>
-                    <button className="btn btn--quiet" type="button" onClick={() => showLog(job)}>
-                      {log?.job.id === job.id ? <ChevronUpIcon /> : <ChevronDownIcon />} Log
                     </button>
                     <button className="btn btn--quiet btn--icon" type="button" title="Delete" onClick={() => remove(job)}>
                       <CloseIcon />
@@ -300,39 +320,67 @@ export default function Automator() {
               ))}
             </div>
           )}
-
-          {log && (
-            <section className="runs">
-              <h3>
-                {log.job.name} — recent runs
-                <button className="btn btn--quiet btn--icon" type="button" onClick={() => setLog(null)} aria-label="Close log">
-                  <CloseIcon />
-                </button>
-              </h3>
-              {!log.runs.length && <p className="meta">No runs yet.</p>}
-              {log.runs.map((run) => (
-                <div className="run" key={run.id}>
-                  <p className="run__head">
-                    <b>{run.status}</b>
-                    <span className="meta">
-                      {askedAt(new Date(run.started_at))}
-                      {run.exit_code !== null && ` · exit ${run.exit_code}`}
-                    </span>
-                    {run.chat_id && (
-                      <Link className="meta" href={`/?chat=${run.chat_id}`}>
-                        open the answer
-                      </Link>
-                    )}
-                  </p>
-                  {run.detail && <pre className="run__out is-error">{run.detail}</pre>}
-                  {run.output && <pre className="run__out">{run.output}</pre>}
-                </div>
-              ))}
-            </section>
-          )}
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * What a job did last, inline: a click used to be needed to see whether a run was worth reading
+ * at all. Older runs and the parts of a long output stay behind one quiet button each.
+ */
+function RunLine({ runs }: { runs: JobRun[] }) {
+  const [full, setFull] = useState(false);
+  const [history, setHistory] = useState(false);
+  if (!runs.length) return <p className="job__runs meta">No runs yet.</p>;
+
+  const shown = history ? runs : runs.slice(0, 1);
+  const earlier = runs.length - shown.length;
+  const long = runs.some((run) => (run.detail || run.output).length > CUT);
+
+  return (
+    <div className="job__runs">
+      {shown.map((run) => (
+        <div className="run" key={run.id}>
+          <p className="run__head">
+            <span className={`tag${run.status === "ok" ? " tag--code" : run.status === "running" ? "" : " tag--warn"}`}>{run.status}</span>
+            <span className="meta">{askedAt(new Date(run.started_at))}</span>
+            {run.exit_code !== null && <span className="meta">exit {run.exit_code}</span>}
+            {run.chat_id && (
+              <Link className="meta" href={`/?chat=${run.chat_id}`}>
+                open the answer
+              </Link>
+            )}
+          </p>
+          {run.detail && (
+            <pre className={`run__out${run.status === "error" ? " is-error" : ""}`}>
+              {full ? run.detail : cut(run.detail)}
+            </pre>
+          )}
+          {run.output && <pre className="run__out">{full ? run.output : cut(run.output)}</pre>}
+        </div>
+      ))}
+      {(earlier > 0 || long) && (
+        <div className="job__runbar">
+          {long && (
+            <button className="btn btn--quiet btn--tiny" type="button" onClick={() => setFull(!full)}>
+              {full ? "Trim the output" : "Whole output"}
+            </button>
+          )}
+          {earlier > 0 && (
+            <button className="btn btn--quiet btn--tiny" type="button" onClick={() => setHistory(true)}>
+              {earlier} earlier run{earlier === 1 ? "" : "s"}
+            </button>
+          )}
+          {history && runs.length > 1 && (
+            <button className="btn btn--quiet btn--tiny" type="button" onClick={() => setHistory(false)}>
+              Only the last run
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -436,7 +484,7 @@ function JobForm({
         </button>
         <span className="savebar__msg">
           {isPrompt
-            ? "The answer is stored as a thread you can open from the log."
+            ? "The answer is stored as a thread — open it from the job once the run finishes."
             : "Needs microsandbox (`msb`) on the Libra server — set MSB_BIN if it is not on PATH."}
         </span>
       </div>
