@@ -336,7 +336,7 @@ Return ONLY valid JSON with these fields:
 - command: one shell line (only when kind is "command", otherwise "")
 - image: container image for a command job — "alpine" unless the user asked for another
 - memory: memory for a command job — "256M" unless the user asked for more
-- max_duration_secs: how long one run may take, between 10 and 3600
+- max_duration_secs: how long one run may take. A command job: 10 to 3600. A prompt job: 300 to 3600 — an answer that searches takes minutes, so 60 there only ever cuts off a job that was going fine.
 - notify_url: a webhook the user named, otherwise ""
 - why: one sentence in the user's language saying what will run and when
 

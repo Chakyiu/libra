@@ -637,8 +637,9 @@ fn checked_job(app: &Arc<App>, body: Job, existing: Option<&Job>) -> LibraResult
         command: body.command.clone(),
         prompt: body.prompt.clone(),
         memory: body.memory.trim().to_string(),
-        // A schedule may not hold the machine hostage; microsandbox caps the VM anyway.
-        max_duration_secs: body.max_duration_secs.clamp(10, 3600),
+        // A schedule may not hold the machine hostage; microsandbox caps the VM anyway, and
+        // a prompt job has a floor of its own because a search-backed answer takes minutes.
+        max_duration_secs: crate::automator::clamp_duration(&body.kind, body.max_duration_secs),
         notify_url: body.notify_url.trim().to_string(),
         // Editing a job must not reset its history or pretend it is new.
         created_at: existing

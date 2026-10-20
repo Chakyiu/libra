@@ -150,7 +150,11 @@ curl -fsSL https://install.microsandbox.dev | sh   # macOS / Linux; needs /dev/k
 ```
 
 Prompt jobs need no extra binary: they call the same answer pipeline the UI uses, so the answer
-appears in the sidebar and the run links to it. A job's optional `notify_url` gets a JSON `POST`
+appears in the sidebar and the run links to it. A question is given **at least five minutes** — a
+search-backed answer usually takes two to five — because a shorter wait only ever reports a job that
+was going fine. If the wait does run out, the run is recorded as failed with what it had so far, and
+the answer keeps running in the background into its thread, which the run still links to. A job's
+optional `notify_url` gets a JSON `POST`
 when a run ends — an ntfy topic works out of the box.
 
 **Telegram tells you about every run at once.** In **Settings → Notifications** put a bot token from
@@ -236,7 +240,7 @@ multi-user auth in front of it with a reverse proxy.
 | `GET /api/discover?topic=tech\|finance\|art\|sports\|entertainment` | recent news for that topic; a story opens a thread that summarises its URL |
 | `POST /api/generate/image` | `{prompt}` → base64 image (needs an image model) |
 | `GET /api/stocks/{symbol}` | chart series for the stocks widget |
-| `GET /api/jobs` · `POST /api/jobs` | list / create an Automator job `{name, kind: command\|prompt, cron, timezone, image, command, prompt, memory, max_duration_secs, notify_url, enabled}` — 5-field cron, normalized on save |
+| `GET /api/jobs` · `POST /api/jobs` | list / create an Automator job `{name, kind: command\|prompt, cron, timezone, image, command, prompt, memory, max_duration_secs, notify_url, enabled}` — 5-field cron, normalized on save; `max_duration_secs` is clamped per kind (command 10–3600, prompt 300–3600) |
 | `POST /api/jobs/from-text` | the Automator helper: `{text}` (one sentence) → `{job, why, notes}` — the light model fills the job, `notes` lists what it guessed, and the job is saved |
 | `POST /api/notifications/telegram/chats` | `{bot_token}` → `{chats: [{id, title}]}` — the chats that have messaged this bot, newest first. A blank token uses the saved one |
 | `POST /api/notifications/telegram/test` | `{bot_token, chat_id}` → `{sent: true}` — one message to prove the bot can post there |

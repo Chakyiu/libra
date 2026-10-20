@@ -22,6 +22,29 @@ use std::time::Duration;
 const TICK: Duration = Duration::from_secs(20);
 /// Output is stored for the UI, not shipped whole: a chatty job is clipped to this.
 const MAX_OUTPUT_CHARS: usize = 20_000;
+/// How long one run may take, per kind. A command job hands its number to microsandbox, so
+/// it may be short. A prompt job is a whole search-and-answer, which takes minutes on a
+/// quiet day, so it has a floor of its own — a 60-second budget there only ever reports a
+/// job that was going fine.
+const COMMAND_MIN_SECS: i64 = 10;
+const PROMPT_MIN_SECS: i64 = 300;
+const MAX_SECS: i64 = 3_600;
+
+/// The stored budget made legal for this kind of job. The API clamps with this on save and
+/// the scheduler reads it back, so an old row typed before the floor existed gets a real
+/// budget without a migration.
+pub fn clamp_duration(kind: &str, secs: i64) -> i64 {
+    let floor = if kind == "prompt" {
+        PROMPT_MIN_SECS
+    } else {
+        COMMAND_MIN_SECS
+    };
+    secs.clamp(floor, MAX_SECS)
+}
+
+fn budget_secs(job: &Job) -> i64 {
+    clamp_duration(&job.kind, job.max_duration_secs)
+}
 
 /// A job's result, before it is written to `job_runs`.
 struct Outcome {
@@ -144,7 +167,7 @@ async fn execute(app: Arc<App>, job: Job, run_id: i64) {
 /// time limit; the outer timeout is only there in case the CLI itself hangs.
 async fn run_command(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
     let cfg = app.settings.get();
-    let seconds = job.max_duration_secs.clamp(10, 3600) as u64;
+    let seconds = budget_secs(job) as u64;
     let limit = format!("{seconds}s");
     let image = pick(&job.image, "alpine");
     let memory = pick(&job.memory, "256M");
@@ -191,7 +214,8 @@ async fn run_command(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
 /// other, so the run links straight to it.
 async fn run_prompt(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
     let chat_id = uuid::Uuid::new_v4().to_string();
-    let budget = Duration::from_secs(job.max_duration_secs.clamp(60, 3600) as u64);
+    let seconds = budget_secs(job);
+    let budget = Duration::from_secs(seconds as u64);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
     let pipeline = app.pipeline.clone();
     let req = AskRequest {
@@ -211,44 +235,61 @@ async fn run_prompt(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
         pipeline.ask(req, tx).await;
     });
 
-    let collect = async {
-        let mut answer = String::new();
-        let mut error: Option<String> = None;
-        while let Some(event) = rx.recv().await {
-            match event {
-                Event::AnswerChunk(chunk) => answer.push_str(&chunk),
-                Event::Close(Some(message)) => error = Some(message),
-                _ => {}
+    // Both kinds of job are watched, not joined: a prompt answer that runs past its budget
+    // is still stored as a thread, so a cut-off run reports what it has and keeps the link.
+    let mut answer = String::new();
+    let mut failure: Option<String> = None;
+    let deadline = tokio::time::sleep(budget);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => {
+                return Ok(Outcome {
+                    output: answer,
+                    detail: format!(
+                        "no answer within {seconds}s — the part it wrote is kept in the thread, which carries on in the background"
+                    ),
+                    exit_code: None,
+                    chat_id,
+                    ok: false,
+                });
+            }
+            event = rx.recv() => {
+                match event {
+                    Some(Event::AnswerChunk(chunk)) => answer.push_str(&chunk),
+                    Some(Event::Close(message)) => {
+                        failure = message;
+                        break;
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
             }
         }
-        // A failed answer still leaves a thread, so keep the link either way.
-        match error {
-            Some(e) => Ok(Outcome {
-                output: answer,
-                detail: e,
-                exit_code: None,
-                chat_id,
-                ok: false,
-            }),
-            None if answer.trim().is_empty() => Ok(Outcome {
-                output: answer,
-                detail: "the answer came back empty".into(),
-                exit_code: None,
-                chat_id,
-                ok: false,
-            }),
-            None => Ok(Outcome {
-                output: answer,
-                detail: String::new(),
-                exit_code: None,
-                chat_id,
-                ok: true,
-            }),
-        }
-    };
-    match tokio::time::timeout(budget, collect).await {
-        Ok(result) => result,
-        Err(_) => anyhow::bail!("the answer did not finish within {}s", budget.as_secs()),
+    }
+    drop(rx);
+    match failure {
+        Some(e) => Ok(Outcome {
+            output: answer,
+            detail: e,
+            exit_code: None,
+            chat_id,
+            ok: false,
+        }),
+        None if answer.trim().is_empty() => Ok(Outcome {
+            output: answer,
+            detail: "the answer came back empty".into(),
+            exit_code: None,
+            chat_id,
+            ok: false,
+        }),
+        None => Ok(Outcome {
+            output: answer,
+            detail: String::new(),
+            exit_code: None,
+            chat_id,
+            ok: true,
+        }),
     }
 }
 
@@ -395,6 +436,14 @@ fn draft(v: &Value, text: &str, now: &str) -> Plan {
         }
     };
 
+    let asked_secs = v["max_duration_secs"].as_i64().unwrap_or(300);
+    let budget = clamp_duration(kind, asked_secs);
+    if kind == "prompt" && budget != asked_secs {
+        notes.push(format!(
+            "An answer that searches takes minutes, not seconds, so this job waits {budget}s rather than {asked_secs}s."
+        ));
+    }
+
     Plan {
         job: Job {
             id: uuid::Uuid::new_v4().to_string(),
@@ -407,10 +456,7 @@ fn draft(v: &Value, text: &str, now: &str) -> Plan {
             command,
             prompt,
             memory: pick(&field("memory"), "256M"),
-            max_duration_secs: v["max_duration_secs"]
-                .as_i64()
-                .unwrap_or(300)
-                .clamp(10, 3600),
+            max_duration_secs: budget,
             notify_url: field("notify_url"),
             created_at: now.to_string(),
             // Recomputed by checked_job on the way in; this is only so the draft is a
@@ -703,6 +749,36 @@ mod tests {
         );
         assert_eq!(plan.job.prompt, "summarise the news");
         assert_eq!(plan.job.name, "summarise the news");
+    }
+
+    #[test]
+    fn a_prompt_job_is_never_given_a_budget_it_cannot_meet() {
+        let plan = draft(
+            &json!({
+                "kind": "prompt",
+                "prompt": "what is the price of AAPL",
+                "cron": "0 9 * * 1",
+                "max_duration_secs": 60
+            }),
+            "x",
+            NOW,
+        );
+        assert_eq!(plan.job.max_duration_secs, 300);
+        assert!(
+            plan.notes
+                .iter()
+                .any(|n| n.contains("300s rather than 60s")),
+            "{:?}",
+            plan.notes
+        );
+        // A command job keeps the short limit: microsandbox stops the shell line itself.
+        assert_eq!(clamp_duration("command", 60), 60);
+        // A row stored before the floor existed still gets a real budget at run time.
+        let mut job = plan.job;
+        job.max_duration_secs = 30;
+        assert_eq!(budget_secs(&job), 300);
+        job.kind = "command".into();
+        assert_eq!(budget_secs(&job), 30);
     }
 
     #[test]

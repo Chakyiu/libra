@@ -2,6 +2,8 @@
 """Mock OpenAI-compatible LLM for end-to-end tests (no API keys needed)."""
 import hashlib
 import json
+import os
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ANSWER = (
@@ -94,10 +96,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
+        # MOCK_LLM_DELAY=4 makes the answer arrive slowly, to test what a timed-out
+        # run does with an answer that is still on its way.
+        delay = float(os.environ.get("MOCK_LLM_DELAY", 0))
         step = 24
         for i in range(0, len(content), step):
             chunk = {"choices": [{"index": 0, "delta": {"content": content[i:i + step]}}]}
             self.wfile.write(b"data: " + json.dumps(chunk).encode() + b"\n\n")
+            self.wfile.flush()
+            if delay:
+                time.sleep(delay)
         self.wfile.write(b"data: [DONE]\n\n")
 
     def json(self, obj):

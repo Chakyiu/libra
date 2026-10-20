@@ -85,6 +85,17 @@
 .idea__input { flex: 1 1 240px; }
 /* the one line under the job form's fields, pointing at the instance-wide notifier */
 .jobform__note { margin: 10px 0 0; }
+/* under a field: what its number actually limits. Restates the label's mono caps. */
+.field-label .field-help {
+  font-family: var(--font-body);
+  font-size: calc(11.5 / 15 * 1rem);
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted);
+  margin: 1px 0 0;
+  max-width: 46ch;
+}
 
 /* What the helper made, and what it wants checked. */
 .callout--made { border-left-color: var(--success); }

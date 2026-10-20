@@ -358,7 +358,14 @@ function JobForm({
         </label>
         <label className="field-label">
           <span>Kind</span>
-          <select value={draft.kind} onChange={(e) => set({ kind: e.target.value as Job["kind"] })}>
+          <select
+            value={draft.kind}
+            onChange={(e) => {
+              const kind = e.target.value as Job["kind"];
+              // a question through Libra needs minutes, not a minute: lifting a short wait here keeps the form honest about what gets saved
+              set(kind === "prompt" && draft.max_duration_secs < 300 ? { kind, max_duration_secs: 300 } : { kind });
+            }}
+          >
             <option value="command">Command in a microVM</option>
             <option value="prompt">Question through Libra</option>
           </select>
@@ -402,11 +409,14 @@ function JobForm({
           <span>Max run seconds</span>
           <input
             type="number"
-            min={10}
+            min={isPrompt ? 300 : 10}
             max={3600}
             value={draft.max_duration_secs}
             onChange={(e) => set({ max_duration_secs: Number(e.target.value) || 0 })}
           />
+          <span className="field-help">
+            {isPrompt ? ("A question gets at least 300 s — a search-backed answer usually takes two to five minutes. If the wait runs out the job is marked failed, but the thread keeps the answer, which finishes in the background.") : ("microsandbox stops the shell line after this long.")}
+          </span>
         </label>
         <label className="field-label">
           <span>Notify webhook (optional)</span>
