@@ -42,6 +42,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/stocks/{symbol}", get(stock_chart))
         // The Automator's schedules: CRUD, run now, and run history.
         .route("/jobs", get(list_jobs).post(create_job))
+        // The AI helper: one sentence in, a saved job out.
+        .route("/jobs/from-text", post(job_from_text))
         .route(
             "/jobs/{id}",
             get(get_job).put(update_job).delete(delete_job),
@@ -450,6 +452,25 @@ struct RunsQuery {
 
 async fn list_jobs(State(app): State<Arc<App>>) -> LibraResult<Json<Value>> {
     Ok(Json(json!(app.db.list_jobs().await?)))
+}
+
+#[derive(Deserialize)]
+struct JobIdea {
+    text: String,
+}
+
+/// Turn one sentence into a job and store it, switched on. The helper only drafts, so
+/// the schedule and timezone go through exactly the checks the hand-written form gets.
+async fn job_from_text(
+    State(app): State<Arc<App>>,
+    Json(body): Json<JobIdea>,
+) -> LibraResult<Json<Value>> {
+    let plan = crate::automator::plan(&app, &body.text).await?;
+    let job = checked_job(&app, plan.job, None)?;
+    app.db.save_job(&job).await?;
+    Ok(Json(
+        json!({ "job": job, "why": plan.why, "notes": plan.notes }),
+    ))
 }
 
 async fn get_job(State(app): State<Arc<App>>, Path(id): Path<String>) -> LibraResult<Json<Value>> {

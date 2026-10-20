@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Topbar from "@/components/Topbar";
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, PlusIcon, RerunIcon } from "@/components/icons";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, PlusIcon, RerunIcon, SparkleIcon } from "@/components/icons";
 import { api, putJson } from "@/lib/api";
 import { askedAt, shortDate } from "@/lib/format";
 
@@ -38,6 +38,9 @@ type JobRun = {
   chat_id: string;
 };
 
+/** What the AI helper answers: the job it stored, plus how it read the request. */
+type Created = { job: Job; why: string; notes: string[] };
+
 const BLANK: Job = {
   id: "",
   name: "",
@@ -61,6 +64,9 @@ export default function Automator() {
   const [draft, setDraft] = useState<Job | null>(null);
   const [log, setLog] = useState<{ job: Job; runs: JobRun[] } | null>(null);
   const [error, setError] = useState("");
+  const [idea, setIdea] = useState("");
+  const [making, setMaking] = useState(false);
+  const [made, setMade] = useState<Created | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +87,30 @@ export default function Automator() {
     const timer = setInterval(load, 2000);
     return () => clearInterval(timer);
   }, [jobs, load]);
+
+  // One sentence to the helper: it drafts a job and stores it switched on.
+  async function createFromText() {
+    const text = idea.trim();
+    if (!text || making) return;
+    setError("");
+    setMade(null);
+    setMaking(true);
+    try {
+      setMade(
+        await api<Created>("/api/jobs/from-text", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text }),
+        }),
+      );
+      setIdea("");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setMaking(false);
+    }
+  }
 
   async function save() {
     if (!draft) return;
@@ -149,11 +179,65 @@ export default function Automator() {
           </header>
 
           {!draft && (
-            <p className="jobs__bar">
-              <button className="btn btn--primary" type="button" onClick={() => setDraft({ ...BLANK })}>
-                <PlusIcon /> New job
+            <form
+              className="idea"
+              onSubmit={(e) => {
+                e.preventDefault();
+                createFromText();
+              }}
+            >
+              <input
+                type="text"
+                className="idea__input"
+                value={idea}
+                aria-label="Say what you want Libra to do on a schedule"
+                placeholder="Every weekday morning at 8 London time, tell me what changed in the Rust release notes"
+                onChange={(e) => setIdea(e.target.value)}
+              />
+              <button className="btn btn--primary" type="submit" disabled={making || !idea.trim()}>
+                <SparkleIcon /> {making ? "Thinking…" : "Make it a job"}
               </button>
-            </p>
+              <button className="btn btn--quiet" type="button" onClick={() => setDraft({ ...BLANK })}>
+                <PlusIcon /> By hand
+              </button>
+            </form>
+          )}
+
+          {made && (
+            <div className="callout callout--made">
+              <p className="callout__head">
+                <b>Scheduled “{made.job.name}”.</b>
+                <span className="meta">
+                  <code>{made.job.cron}</code> · {made.job.timezone || "server time"} · next {when(made.job.next_run_at)}
+                </span>
+              </p>
+              {made.why && <p className="callout__why">{made.why}</p>}
+              {!!made.notes.length && (
+                <ul className="callout__notes">
+                  {made.notes.map((note, i) => (
+                    <li key={i}>{note}</li>
+                  ))}
+                </ul>
+              )}
+              <div className="job__actions">
+                <button
+                  className="btn btn--quiet"
+                  type="button"
+                  onClick={() => {
+                    setDraft({ ...made.job });
+                    setMade(null);
+                  }}
+                >
+                  Adjust
+                </button>
+                <button className="btn btn--quiet" type="button" onClick={() => run(made.job)}>
+                  <RerunIcon /> Run now
+                </button>
+                <button className="btn btn--quiet btn--icon" type="button" title="Dismiss" onClick={() => setMade(null)}>
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
           )}
 
           {error && (
@@ -176,8 +260,9 @@ export default function Automator() {
 
           {!jobs.length && !draft ? (
             <p className="callout">
-              Nothing scheduled yet. Start with something small — <code>0 7 * * *</code> running{" "}
-              <code>curl -s https://example.com | head</code>, or a prompt job that asks the same question every Monday.
+              Nothing scheduled yet. Describe a job above and the helper will set it up, or write it by hand — start
+              small: <code>0 7 * * *</code> running <code>curl -s https://example.com | head</code>, or a prompt job that
+              asks the same question every Monday.
             </p>
           ) : (
             <div className="jobs">
@@ -200,6 +285,9 @@ export default function Automator() {
                     </button>
                     <button className="btn btn--quiet" type="button" aria-pressed={job.enabled} onClick={() => toggle(job)}>
                       {job.enabled ? "Pause" : "Resume"}
+                    </button>
+                    <button className="btn btn--quiet" type="button" onClick={() => setDraft({ ...job })}>
+                      Edit
                     </button>
                     <button className="btn btn--quiet" type="button" onClick={() => showLog(job)}>
                       {log?.job.id === job.id ? <ChevronUpIcon /> : <ChevronDownIcon />} Log

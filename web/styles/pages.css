@@ -80,7 +80,19 @@
 
 /* ─── automator ───────────────────────────────────────────────── */
 
-.jobs__bar { display: flex; gap: 8px; margin: 0 0 20px; }
+/* One sentence to the helper, a saved job back. */
+.idea { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
+.idea__input { flex: 1 1 240px; }
+
+/* What the helper made, and what it wants checked. */
+.callout--made { border-left-color: var(--success); }
+.callout__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 12px; margin: 0; }
+.callout__head code { font-family: var(--font-mono); font-size: calc(12 / 15 * 1rem); color: var(--fg); }
+.callout__why { margin: 5px 0 0; }
+.callout__notes { margin: 6px 0 0; padding-left: 1.15em; }
+.callout__notes li { margin-bottom: 3px; }
+.callout--made .job__actions { margin-top: 12px; }
+.callout--made .job__actions .btn { margin-top: 0; }
 
 .jobform {
   border: 1px solid var(--border);

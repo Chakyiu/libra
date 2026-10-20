@@ -36,6 +36,29 @@ def classify(system: str, user: str) -> str | None:
         return json.dumps({"needs_follow_up": True, "question": "rust redis performance"})
     if system.startswith("You plan the sections of a long-form"):
         return json.dumps({"sections": ["Opening", "How it works", "Tradeoffs", "What to watch"]})
+    if system.startswith("You are the Automator's helper"):
+        # A schedule the server cannot read, to exercise the fallbacks and the notes.
+        if "unparseable" in user:
+            return json.dumps({
+                "name": "Odd one",
+                "kind": "command",
+                "cron": "sometime soon",
+                "timezone": "Mars/Olympus_Mons",
+                "command": "curl -s https://example.com | head",
+                "why": "Runs a shell line soon-ish",
+            })
+        return json.dumps({
+            "name": "Rust release notes",
+            "kind": "prompt",
+            "cron": "0 8 * * 1-5",
+            "timezone": "Europe/London",
+            "prompt": "What changed in the Rust release notes since the last check?",
+            "image": "",
+            "memory": "",
+            "max_duration_secs": 300,
+            "notify_url": "",
+            "why": "Weekdays at 08:00 London time, asking Libra what changed since the last run",
+        })
     return None
 
 

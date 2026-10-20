@@ -37,6 +37,11 @@ export function Mark({ size = 18, stroke = 1.7, dot = false }: { size?: number; 
 
 export const MenuIcon = icon(<path d="M4 5h16M4 12h10M4 19h16" />, { stroke: 1.7 });
 export const PlusIcon = icon(<path d="M12 5v14M5 12h14" />, { size: 14, stroke: 1.8 });
+/** A four-point sparkle: the helper that turns a sentence into a job. */
+export const SparkleIcon = icon(
+  <path d="M12 4.5 13.6 9.4 18.5 11 13.6 12.6 12 17.5 10.4 12.6 5.5 11 10.4 9.4Z" />,
+  { size: 14, stroke: 1.7 },
+);
 /** A toothed cog — a hub with rays reads as the theme's sun. */
 export const GearIcon = icon(
   <>

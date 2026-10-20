@@ -27,7 +27,7 @@ One binary serves the API and the pre-built UI.
 - **Answers that do things.** Calculator, currency conversion, world clock, weather (Open-Meteo) and stock quotes with charts (Nasdaq) render as blocks above the prose.
 - **Your files and your photos.** Upload `txt`, `md`, `csv`, `pdf`, `docx` or images; documents are chunked, embedded and retrieved by cosine similarity, images go to a vision model.
 - **Image and video results, a Discover feed** (tech, finance, art, sports, entertainment) that opens a thread summarising the story, and optional image generation.
-- **An Automator.** Cron jobs Libra runs for you: one shell line inside a throwaway [microsandbox](https://github.com/superradcompany/microsandbox) microVM, or a saved question whose answer is filed as a thread. Per-job timezone, run history, run-now, and an optional webhook when a run ends.
+- **An Automator.** Cron jobs Libra runs for you: one shell line inside a throwaway [microsandbox](https://github.com/superradcompany/microsandbox) microVM, or a saved question whose answer is filed as a thread. Per-job timezone, run history, run-now, and an optional webhook when a run ends. Or say one sentence and the AI helper writes the job.
 - **Multilingual.** Ask in Chinese, get a Chinese answer and a Chinese thread title.
 - **Stops, survives, reloads.** Answers stream over SSE; reloading mid-answer restores the partial turn and keeps polling. Stopping keeps what was written. No accounts, no cookies, no telemetry.
 - **Optional access token.** Set one env var and every `/api` call needs it; cross-origin access is closed by default. See [Securing it](#securing-it).
@@ -153,6 +153,13 @@ Prompt jobs need no extra binary: they call the same answer pipeline the UI uses
 appears in the sidebar and the run links to it. A job's optional `notify_url` gets a JSON `POST`
 when a run ends — an ntfy topic works out of the box.
 
+**You do not have to write the cron expression.** Type one sentence into the Automator — *every
+weekday morning at 8 London time, tell me what changed in the Rust release notes* — and its helper
+fills the form: name, kind, schedule, timezone, and what the job should ask or run. It uses the light
+model, saves the job switched on, and lists every field it had to guess so you can adjust what it got
+wrong. A schedule it cannot read becomes 07:00 every day rather than an error, and a command job says
+so, because that line runs in a microVM on your server.
+
 **In Docker** the scheduler and prompt jobs need nothing extra — they are part of the Libra process.
 Command jobs are different: the image ships `msb`, but a microVM needs hardware virtualization, so
 the container must be given the hypervisor device:
@@ -215,6 +222,7 @@ multi-user auth in front of it with a reverse proxy.
 | `POST /api/generate/image` | `{prompt}` → base64 image (needs an image model) |
 | `GET /api/stocks/{symbol}` | chart series for the stocks widget |
 | `GET /api/jobs` · `POST /api/jobs` | list / create an Automator job `{name, kind: command\|prompt, cron, timezone, image, command, prompt, memory, max_duration_secs, notify_url, enabled}` — 5-field cron, normalized on save |
+| `POST /api/jobs/from-text` | the Automator helper: `{text}` (one sentence) → `{job, why, notes}` — the light model fills the job, `notes` lists what it guessed, and the job is saved |
 | `GET /api/jobs/{id}` · `PUT /api/jobs/{id}` · `DELETE /api/jobs/{id}` | read / replace / remove a job |
 | `POST /api/jobs/{id}/run` | start it now, outside its schedule |
 | `GET /api/jobs/{id}/runs?limit=20` | run history: status, exit code, stdout, stderr, and `chat_id` for prompt jobs |
@@ -249,7 +257,8 @@ src/
   search/            provider trait + 7 providers + fallback router with Redis cache
   pipeline/          ask(): classify → widgets → plan → rounds → filter → rerank → read pages → answer (or report) → suggestions
   fetch.rs           read cited pages with Obscura, or a plain HTTP fetch when it is not installed
-  automator/         cron schedules, the msb call that starts one microVM per run, run history, webhooks
+  automator/         cron schedules, the msb call that starts one microVM per run, run history, webhooks,
+                     and a helper that turns one sentence into a saved job
   uploads/           text/pdf/docx/image extraction, chunking, embedding, cosine retrieval
   widgets/           calculator, currency (ECB rates), time, weather (Open-Meteo), stocks (Nasdaq)
   prompts/           every LLM prompt; all of them return strict JSON
@@ -274,7 +283,8 @@ cargo run &                        # add a "mock" provider in Settings pointing 
 ```
 
 The stub answers every prompt with fixed JSON and streams a fake answer, which is enough to drive
-classify → search → rerank → answer → suggestions end to end.
+classify → search → rerank → answer → suggestions end to end. It also answers the Automator helper,
+so `POST /api/jobs/from-text` can be tried without a model of your own.
 
 The screenshots in this README were taken that way: the real UI and the real pipeline, driven by a
 stub OpenAI-compatible model (same trick as `scripts/mock-llm.py`, with different canned text) and a

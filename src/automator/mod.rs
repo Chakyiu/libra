@@ -8,11 +8,12 @@
 use crate::db::{Job, JobRun};
 use crate::error::{LibraError, LibraResult};
 use crate::pipeline::AskRequest;
+use crate::prompts;
 use crate::state::{App, Event};
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use chrono_tz::Tz;
 use cron::Schedule;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -279,26 +280,186 @@ async fn notify(app: &Arc<App>, job: &Job, run: &JobRun) {
     }
 }
 
+/// What the AI helper made of a sentence: a job ready to store, plus what it decided.
+pub struct Plan {
+    pub job: Job,
+    /// One sentence from the model: what will run, and when.
+    pub why: String,
+    /// Guesses the user should see before the first run — a schedule it had to invent,
+    /// a timezone it could not read, a command that never arrived.
+    pub notes: Vec<String>,
+}
+
+/// One sentence in, one job out. Nothing is stored and nothing runs here; the API
+/// validates the job through `checked_job` and saves it. The light model is enough —
+/// this is a form to fill, not a question to answer.
+pub async fn plan(app: &Arc<App>, text: &str) -> LibraResult<Plan> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(LibraError::BadRequest("tell me what to schedule".into()));
+    }
+    let cfg = app.settings.get();
+    let llm = crate::llm::resolve_chat(&cfg, &app.http, cfg.light_model())?;
+    let user = prompts::fill(
+        prompts::JOB_IDEA_USER,
+        &[("date", &cfg.today()), ("text", text)],
+    );
+    let v = llm
+        .json_call(prompts::JOB_IDEA_SYSTEM, &user, None)
+        .await
+        .map_err(|e| LibraError::Provider {
+            provider: "automator helper".into(),
+            message: e.to_string(),
+        })?;
+    Ok(draft(&v, text, &cfg.now()))
+}
+
+/// The model's JSON made into a job the scheduler can trust. Anything missing falls back
+/// to the form's own defaults, the schedule and timezone go through the same checks a
+/// hand-written job gets, and every substitution the user has not seen becomes a note.
+/// A schedule the model got wrong never rejects the whole request — the day job is kept
+/// and the user is told, because they can see the form it lands in.
+fn draft(v: &Value, text: &str, now: &str) -> Plan {
+    let mut notes: Vec<String> = Vec::new();
+    let field = |key: &str| -> String { v[key].as_str().unwrap_or("").trim().to_string() };
+
+    let mut kind = if field("kind") == "command" {
+        "command"
+    } else {
+        "prompt"
+    };
+    let command = field("command");
+    let mut prompt = field("prompt");
+    if kind == "command" && command.is_empty() {
+        kind = "prompt";
+        notes.push("It did not give a command, so the job asks Libra instead.".into());
+    }
+    if kind == "prompt" && prompt.is_empty() {
+        prompt = text.to_string();
+        notes
+            .push("With no question of its own, the job asks Libra exactly what you wrote.".into());
+    }
+
+    let mut timezone = field("timezone");
+    if !timezone.is_empty() && timezone.parse::<Tz>().is_err() {
+        notes.push(format!(
+            "'{timezone}' is not a timezone I know, so the job uses the server's own."
+        ));
+        timezone = String::new();
+    }
+
+    let given = field("cron");
+    let mut cron = match normalize_cron(&given) {
+        Ok(cron) => cron,
+        Err(_) => {
+            notes.push(if given.is_empty() {
+                "No schedule came with it, so it runs at 07:00 every day — change it if that is wrong.".into()
+            } else {
+                format!(
+                    "'{given}' is not a schedule I can read, so it runs at 07:00 every day — change it if that is wrong."
+                )
+            });
+            DAILY.to_string()
+        }
+    };
+    let mut when = next_run(&cron, &timezone, Utc::now());
+    if when.is_none() {
+        notes.push(format!(
+            "'{given}' never fires, so it runs at 07:00 every day instead."
+        ));
+        cron = DAILY.to_string();
+        when = next_run(&cron, &timezone, Utc::now());
+    }
+    if fires_every_minute(&cron) {
+        notes.push("This fires every minute, so runs will pile up — widen it unless that is what you meant.".into());
+    }
+    if kind == "command" {
+        notes.push("A command job runs that shell line in a microVM on the Libra server. Check it before the first run.".into());
+    }
+
+    let name = {
+        let named = field("name");
+        if named.is_empty() {
+            clip_name(text)
+        } else {
+            named
+        }
+    };
+
+    Plan {
+        job: Job {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            kind: kind.to_string(),
+            cron,
+            timezone,
+            enabled: true,
+            image: pick(&field("image"), "alpine"),
+            command,
+            prompt,
+            memory: pick(&field("memory"), "256M"),
+            max_duration_secs: v["max_duration_secs"]
+                .as_i64()
+                .unwrap_or(300)
+                .clamp(10, 3600),
+            notify_url: field("notify_url"),
+            created_at: now.to_string(),
+            // Recomputed by checked_job on the way in; this is only so the draft is a
+            // complete job on its own.
+            next_run_at: when.unwrap_or_else(|| now.to_string()),
+            last_run_at: String::new(),
+            last_status: String::new(),
+        },
+        why: field("why"),
+        notes,
+    }
+}
+
+/// The schedule the helper falls back to when the model's cannot be read or never fires.
+const DAILY: &str = "0 0 7 * * *";
+
+/// After normalization the minute field is the second one; a bare `*` or a step under
+/// five minutes is the one schedule mistake worth warning about.
+fn fires_every_minute(cron: &str) -> bool {
+    matches!(
+        cron.split_whitespace().nth(1),
+        Some("*") | Some("*/1") | Some("*/2") | Some("*/3") | Some("*/4")
+    )
+}
+
+/// A name from the sentence itself when the model left the field empty.
+fn clip_name(text: &str) -> String {
+    let chars: Vec<char> = text.trim().chars().collect();
+    if chars.len() <= 40 {
+        return text.trim().to_string();
+    }
+    let mut name: String = chars[..40].iter().collect();
+    while name.ends_with([' ', ',', ':', ';', '-']) {
+        name.pop();
+    }
+    format!("{name}…")
+}
+
 /// Accept standard 5-field cron and the 6/7-field form, and store one expression the
-/// scheduler can parse directly: seconds first, and weekdays counted the way cron
-/// counts them. The `cron` crate numbers days 1 = Sunday … 7 = Saturday, so the
-/// day-of-week numbers are shifted (`0 7 * * 1` means Monday 07:00, as everywhere else).
+/// scheduler can parse directly: seconds first, and weekdays counted the way the `cron`
+/// crate counts them (1 = Sunday … 7 = Saturday), so `0 7 * * 1` means Monday 07:00,
+/// as everywhere else. A 6/7-field expression is already in stored form and is kept as
+/// it stands — shifting it again would walk the weekday one day every time a saved job
+/// was edited or re-drafted.
 pub fn normalize_cron(expression: &str) -> Result<String, LibraError> {
     let expression = expression.trim();
     if expression.is_empty() {
         return Err(LibraError::BadRequest("a schedule is required".into()));
     }
-    let fields = expression.split_whitespace().count();
-    let with_seconds = match fields {
-        5 => format!("0 {expression}"),
+    let stored = match expression.split_whitespace().count() {
+        5 => shift_weekday(&format!("0 {expression}")),
         6 | 7 => expression.to_string(),
         _ => return Err(invalid(expression)),
     };
-    let shifted = shift_weekday(&with_seconds);
-    if Schedule::from_str(&shifted).is_err() {
+    if Schedule::from_str(&stored).is_err() {
         return Err(invalid(expression));
     }
-    Ok(shifted)
+    Ok(stored)
 }
 
 fn invalid(expression: &str) -> LibraError {
@@ -395,6 +556,9 @@ fn tail(text: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A stamp in the past, so every drafted job's next run is ahead of it.
+    const NOW: &str = "2026-10-20T00:00:00Z";
+
     #[test]
     fn five_field_cron_is_normalized() {
         assert_eq!(normalize_cron("0 7 * * *").unwrap(), "0 0 7 * * *");
@@ -416,6 +580,10 @@ mod tests {
             "0 0 9 * * MON-FRI"
         );
         assert_eq!(normalize_cron("0 9 * * 1,4").unwrap(), "0 0 9 * * 2,5");
+        // A stored job comes back through the form unchanged: editing it must not walk
+        // the weekday another day.
+        assert_eq!(normalize_cron("0 0 9 * * 2-6").unwrap(), "0 0 9 * * 2-6");
+        assert_eq!(normalize_cron("0 0 7 * * *").unwrap(), "0 0 7 * * *");
         // 2026-10-19 is a Monday, so 1 must land on the 26th, not the 25th.
         let now = DateTime::parse_from_rfc3339("2026-10-19T12:00:00Z")
             .unwrap()
@@ -445,6 +613,126 @@ mod tests {
         assert!(local.parse::<DateTime<Utc>>().unwrap() > now);
         assert!(next_run("0 0 7 * * *", "Mars/Olympus_Mons", now).is_none());
         assert!(next_run("nonsense", "UTC", now).is_none());
+    }
+
+    #[test]
+    fn the_helper_draft_is_a_job_the_scheduler_can_store() {
+        let v = json!({
+            "name": "Rust release notes",
+            "kind": "prompt",
+            "cron": "0 8 * * 1-5",
+            "timezone": "Europe/London",
+            "prompt": "What changed in the Rust release notes since the last check?",
+            "why": "Weekdays at 08:00 London time"
+        });
+        let plan = draft(&v, "every weekday morning tell me about rust releases", NOW);
+        assert_eq!(plan.job.name, "Rust release notes");
+        assert_eq!(plan.job.cron, "0 0 8 * * 2-6");
+        assert_eq!(plan.job.timezone, "Europe/London");
+        assert_eq!(plan.job.kind, "prompt");
+        assert!(plan.job.enabled);
+        assert_eq!(plan.job.image, "alpine");
+        assert_eq!(plan.job.memory, "256M");
+        assert_eq!(plan.job.max_duration_secs, 300);
+        assert!(plan.notes.is_empty());
+        assert!(plan.job.next_run_at.as_str() > NOW);
+        assert_eq!(plan.why, "Weekdays at 08:00 London time");
+    }
+
+    #[test]
+    fn a_schedule_the_helper_could_not_read_falls_back_to_daily() {
+        let plan = draft(&json!({ "cron": "sometime soon" }), "do it soon", NOW);
+        assert_eq!(plan.job.cron, DAILY);
+        assert!(plan.notes.iter().any(|n| n.contains("sometime soon")));
+        // No schedule at all is still a job, and the note says so without quoting "".
+        let bare = draft(&json!({ "prompt": "x" }), "x", NOW);
+        assert_eq!(bare.job.cron, DAILY);
+        assert!(bare.notes.iter().any(|n| n.contains("No schedule")));
+    }
+
+    #[test]
+    fn a_cron_that_never_fires_is_replaced() {
+        // 30 February is a valid expression per field and has no fire time in it.
+        let plan = draft(&json!({ "cron": "0 0 30 2 *" }), "on 30 february", NOW);
+        assert_eq!(plan.job.cron, DAILY);
+        assert!(plan.notes.iter().any(|n| n.contains("never fires")));
+    }
+
+    #[test]
+    fn a_timezone_that_does_not_exist_uses_the_servers_own() {
+        let plan = draft(
+            &json!({ "timezone": "Mars/Olympus_Mons", "cron": "0 7 * * *", "prompt": "x" }),
+            "x",
+            NOW,
+        );
+        assert_eq!(plan.job.timezone, "");
+        assert!(plan.notes.iter().any(|n| n.contains("Mars/Olympus_Mons")));
+    }
+
+    #[test]
+    fn a_command_job_without_a_command_asks_a_question_instead() {
+        let plan = draft(
+            &json!({ "kind": "command", "cron": "0 7 * * *", "prompt": "disk report" }),
+            "x",
+            NOW,
+        );
+        assert_eq!(plan.job.kind, "prompt");
+        assert_eq!(plan.job.prompt, "disk report");
+        assert!(
+            plan.notes
+                .iter()
+                .any(|n| n.contains("did not give a command"))
+        );
+    }
+
+    #[test]
+    fn a_missing_prompt_falls_back_to_the_users_own_words() {
+        let plan = draft(
+            &json!({ "kind": "prompt", "cron": "0 7 * * *" }),
+            "summarise the news",
+            NOW,
+        );
+        assert_eq!(plan.job.prompt, "summarise the news");
+        assert_eq!(plan.job.name, "summarise the news");
+    }
+
+    #[test]
+    fn a_command_job_says_where_the_line_runs() {
+        let plan = draft(
+            &json!({
+                "kind": "command",
+                "command": "curl -s https://example.com",
+                "cron": "*/15 * * * *",
+                "image": "python:3.12",
+                "memory": "512M",
+                "max_duration_secs": 99_999
+            }),
+            "x",
+            NOW,
+        );
+        assert_eq!(plan.job.cron, "0 */15 * * * *");
+        assert_eq!(plan.job.image, "python:3.12");
+        assert_eq!(plan.job.memory, "512M");
+        // A schedule may not hold the machine hostage.
+        assert_eq!(plan.job.max_duration_secs, 3600);
+        assert!(plan.notes.iter().any(|n| n.contains("microVM")));
+        assert!(!plan.notes.iter().any(|n| n.contains("every minute")));
+    }
+
+    #[test]
+    fn a_schedule_that_fires_every_minute_is_warned_about() {
+        let plan = draft(&json!({ "prompt": "x", "cron": "* * * * *" }), "x", NOW);
+        assert!(plan.notes.iter().any(|n| n.contains("every minute")));
+    }
+
+    #[test]
+    fn a_long_sentence_without_a_name_still_gets_one() {
+        let long =
+            "every weekday morning at eight check the rust release notes and tell me what changed";
+        let plan = draft(&json!({ "prompt": "x", "cron": "0 7 * * *" }), long, NOW);
+        assert!(plan.job.name.chars().count() <= 41);
+        assert!(plan.job.name.ends_with('…'));
+        assert!(plan.job.name.starts_with("every weekday morning"));
     }
 
     #[test]
