@@ -119,7 +119,7 @@ pub async fn run_now(app: &Arc<App>, job: &Job) -> LibraResult<i64> {
 async fn execute(app: Arc<App>, job: Job, run_id: i64) {
     let started = Utc::now();
     let outcome = match job.kind.as_str() {
-        "prompt" => run_prompt(&app, &job).await,
+        "prompt" => run_prompt(&app, &job, run_id).await,
         _ => run_command(&app, &job).await,
     };
     let (status, run) = match outcome {
@@ -133,11 +133,7 @@ async fn execute(app: Arc<App>, job: Job, run_id: i64) {
                 status: if o.ok { "ok" } else { "error" }.into(),
                 exit_code: o.exit_code,
                 output: clip(&o.output),
-                detail: if !o.ok && o.detail.is_empty() {
-                    tail(&o.output)
-                } else {
-                    clip(&o.detail)
-                },
+                detail: clip(&o.detail),
                 chat_id: o.chat_id,
             },
         ),
@@ -210,10 +206,41 @@ async fn run_command(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
     })
 }
 
+/// Questions are asked one at a time. Ollama serves a single request by default and the free
+/// hosted models rate-limit parallel ones, so two jobs due in the same minute used to spend the
+/// second job's whole budget queued *inside* the model and report a timeout for an answer that was
+/// simply waiting its turn. The permit travels with the ask rather than with the task watching it,
+/// so a run whose report time expires keeps its place until the thread is really finished.
+static MODEL_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// How long a question will sit in that queue before the run gives up and says so.
+const QUEUE_LIMIT: Duration = Duration::from_secs(900);
+
+const QUEUE_NOTE: &str = "waiting for the model — Libra asks one question at a time";
+
 /// Ask a question through the normal answer pipeline. The thread is stored like any
 /// other, so the run links straight to it.
-async fn run_prompt(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
+async fn run_prompt(app: &Arc<App>, job: &Job, run_id: i64) -> anyhow::Result<Outcome> {
     let chat_id = uuid::Uuid::new_v4().to_string();
+    // Best effort, and worth it: the thread exists as soon as the ask starts, so the card can
+    // link it while the job runs instead of only after it closes.
+    let _ = app.db.note_job_run(run_id, &chat_id, "").await;
+    // The wait happens before the budget clock starts: queued time is not the answer's fault.
+    let slot = match MODEL_SLOT.try_acquire() {
+        Ok(ready) => ready,
+        Err(_) => {
+            tracing::info!("job '{}' is queued behind another question", job.name);
+            let _ = app.db.note_job_run(run_id, &chat_id, QUEUE_NOTE).await;
+            match tokio::time::timeout(QUEUE_LIMIT, MODEL_SLOT.acquire()).await {
+                Ok(Ok(turn)) => turn,
+                Ok(Err(_)) => anyhow::bail!("the model queue closed"),
+                Err(_) => anyhow::bail!(
+                    "another question has had the model for {} minutes — check the model in Settings",
+                    QUEUE_LIMIT.as_secs() / 60
+                ),
+            }
+        }
+    };
     let seconds = budget_secs(job);
     let budget = Duration::from_secs(seconds as u64);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
@@ -232,6 +259,8 @@ async fn run_prompt(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
     };
     // Not awaited: an answer that runs past the budget is still stored as a thread.
     tokio::spawn(async move {
+        // Released when the answer is finished, not when this job stops watching it.
+        let _slot = slot;
         pipeline.ask(req, tx).await;
     });
 
@@ -247,7 +276,9 @@ async fn run_prompt(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
                 return Ok(Outcome {
                     output: answer,
                     detail: format!(
-                        "no answer within {seconds}s — the part it wrote is kept in the thread, which carries on in the background"
+                        "no answer within {seconds}s — a model that is busy, offline or set wrong \
+                         shows up here, so check it in Settings. What it wrote so far is kept in the \
+                         thread, which carries on in the background"
                     ),
                     exit_code: None,
                     chat_id,

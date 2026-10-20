@@ -769,6 +769,26 @@ impl Db {
         Ok(res.last_insert_rowid())
     }
 
+    /// Tell the reader what a run that is still going is doing: the thread it is writing, and
+    /// why a question queued behind another one looks like a job that is thinking. Only a live
+    /// row is touched, so the closing write is never overwritten by a late note.
+    pub async fn note_job_run(
+        &self,
+        run_id: i64,
+        chat_id: &str,
+        detail: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE job_runs SET chat_id = ?, detail = ? WHERE id = ? AND status = 'running'",
+        )
+        .bind(chat_id)
+        .bind(detail)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Close a run row, mirror its state onto the job, and keep only the newest `KEEP_RUNS`.
     pub async fn finish_job_run(&self, run: &JobRun) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
@@ -1020,5 +1040,52 @@ mod tests {
         }
         let db = Db::connect(&path).await.unwrap();
         assert_eq!(db.get_messages("c1").await.unwrap()[1].status, "stopped");
+    }
+
+    /// The Automator writes into a live run row while the run is going — the thread it belongs to,
+    /// and a note when it has to wait for the model. None of that may survive the run's own closing
+    /// state, which is what the card shows afterwards.
+    #[tokio::test]
+    async fn a_run_note_only_reaches_a_run_that_is_still_going() {
+        let mut job: Job = serde_json::from_str("{}").unwrap();
+        job.id = "job-1".into();
+        job.name = "Asks a question".into();
+        job.kind = "prompt".into();
+
+        let db = fresh().await;
+        db.save_job(&job).await.unwrap();
+        let run = db
+            .start_job_run(&job.id, "2026-10-20T08:00:00Z")
+            .await
+            .unwrap();
+
+        db.note_job_run(run, "chat-1", "waiting for the model")
+            .await
+            .unwrap();
+        let rows = db.list_job_runs(&job.id, 5).await.unwrap();
+        assert_eq!(rows[0].status, "running");
+        assert_eq!(rows[0].chat_id, "chat-1");
+        assert_eq!(rows[0].detail, "waiting for the model");
+
+        db.finish_job_run(&JobRun {
+            id: run,
+            job_id: job.id.clone(),
+            started_at: "2026-10-20T08:00:00Z".into(),
+            finished_at: "2026-10-20T08:05:00Z".into(),
+            status: "error".into(),
+            exit_code: None,
+            output: String::new(),
+            detail: "no answer within 300s".into(),
+            chat_id: "chat-1".into(),
+        })
+        .await
+        .unwrap();
+        // A straggling note must not bury the reason the run really stopped with.
+        db.note_job_run(run, "chat-1", "waiting for the model")
+            .await
+            .unwrap();
+        let rows = db.list_job_runs(&job.id, 5).await.unwrap();
+        assert_eq!(rows[0].status, "error");
+        assert_eq!(rows[0].detail, "no answer within 300s");
     }
 }

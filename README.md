@@ -12,7 +12,7 @@ One binary serves the API and the pre-built UI.
 </p>
 
 <p align="center">
-<a href="LICENSE">MIT</a> · <a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How it works</a> · <a href="#http-api">HTTP API</a> · <a href="#configuration">Configuration</a>
+<a href="LICENSE">MIT</a> · <a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How it works</a> · <a href="#the-automator">The Automator</a> · <a href="#http-api">HTTP API</a> · <a href="#configuration">Configuration</a>
 </p>
 
 ---
@@ -27,7 +27,7 @@ One binary serves the API and the pre-built UI.
 - **Answers that do things.** Calculator, currency conversion, world clock, weather (Open-Meteo) and stock quotes with charts (Nasdaq) render as blocks above the prose.
 - **Your files and your photos.** Upload `txt`, `md`, `csv`, `pdf`, `docx` or images; documents are chunked, embedded and retrieved by cosine similarity, images go to a vision model.
 - **Image and video results, a Discover feed** (tech, finance, art, sports, entertainment) that opens a thread summarising the story, and optional image generation.
-- **An Automator.** Cron jobs Libra runs for you: one shell line inside a throwaway [microsandbox](https://github.com/superradcompany/microsandbox) microVM, or a saved question whose answer is filed as a thread. Per-job timezone, run history, run-now, and a message when a run ends — a webhook per job, or Telegram for the whole instance. Or say one sentence and the AI helper writes the job.
+- **An Automator.** Cron jobs Libra runs for you: one shell line inside a throwaway [microsandbox](https://github.com/superradcompany/microsandbox) microVM, or a saved question whose answer is filed as a thread. Per-job timezone, the last run's output sitting in the list itself, run-now, and a message when a run ends — a webhook per job, or Telegram for the whole instance. Or say one sentence and the AI helper writes the job.
 - **Multilingual.** Ask in Chinese, get a Chinese answer and a Chinese thread title.
 - **Stops, survives, reloads.** Answers stream over SSE; reloading mid-answer restores the partial turn and keeps polling. Stopping keeps what was written. No accounts, no cookies, no telemetry.
 - **Optional access token.** Set one env var and every `/api` call needs it; cross-origin access is closed by default. See [Securing it](#securing-it).
@@ -64,6 +64,10 @@ references · images · videos · follow-up questions
 Uploaded documents (chunked + embedded) and attached images are retrieved alongside the web
 searches and land in the same reference list. Everything above streams to the browser as blocks
 over one SSE connection, and every block is stored, so a thread reloads exactly as it was answered.
+
+Nothing about that path belongs to the browser. An [Automator](#the-automator) prompt job calls the
+same `ask()` on a timer and files the same thread, which is why a scheduled answer looks exactly
+like one you asked for.
 
 ### Why this shape
 
@@ -122,40 +126,67 @@ disabled; `REDIS_DISABLED=1` skips the connection attempt entirely. SearxNG and 
 optional too — a provider is skipped when it has no key, is disabled, or returns nothing, and the
 first provider that yields results wins.
 
-## Configuration
+## The Automator
 
-Everything in `.env.example` can also be changed at runtime from `/settings`. Precedence:
+Cron jobs Libra runs for itself, on the machine Libra runs on. The schedule loop lives in the Libra
+process and every run is recorded, so the page says what ran, when, what it printed, and what it
+answered. There are two kinds of job — a shell line in a throwaway microVM, or a saved question — and
+you can describe either in one sentence instead of writing the cron expression.
 
-```
-env vars  →  $LIBRA_DATA_DIR/settings.json  →  PUT /api/settings (live, no restart)
-```
+<p align="center">
+<img src="docs/screenshots/automator.png" alt="The Automator: a box to describe a job in one sentence, and three jobs each showing its next run and what its last run printed" width="1200">
+</p>
 
-Settings are held in an `Arc<RwLock<Config>>`; a change swaps the `Arc` and each in-flight request
-keeps the snapshot it started with. No subsystem rebuild, no restart. Model providers and the models
-chosen from them are the exception — those come only from Settings, never from env vars.
+### Say it in one sentence
 
-Search fallback order is per kind (`WEB_SEARCH_ORDER`, `NEWS_SEARCH_ORDER`, `IMAGE_SEARCH_ORDER`,
-`VIDEO_SEARCH_ORDER`).
+Type a sentence into the Automator — *every weekday morning at 8 London time, tell me what changed in
+the Rust release notes* — and its helper fills the job: name, kind, schedule, timezone, and what the
+job should ask or run. It uses the **light** model, saves the job switched on, and lists every field
+it had to guess, so you can fix what it got wrong with **Adjust** before the first run rather than
+deleting it. A schedule it cannot read becomes 07:00 every day rather than an error, and a command
+job says so out loud, because that line runs in a microVM on your server.
 
-### Scheduled jobs
+`POST /api/jobs/from-text` with `{text}` is the same call the box makes, so a script can do it too.
+**By hand** opens the form with the same fields, **Edit** reopens a saved job, and **Run now** starts
+a run outside its schedule.
 
-The Automator keeps its schedules on the host — microsandbox deliberately has no scheduler, so each
-run is a fresh disposable microVM (`msb run --name libra-<job> --replace --memory 256M
---max-duration 5m -- <image> -- sh -lc '<command>'`) and the timer lives here. Command jobs need the
-`msb` CLI on the machine serving Libra:
+### Two kinds of job
+
+**A command job** runs one shell line inside a throwaway
+[microsandbox](https://github.com/superradcompany/microsandbox) microVM. microsandbox deliberately has
+no scheduler, so each run starts a fresh, disposable microVM (`msb run --name libra-<job> --replace
+--memory 256M --max-duration 5m -- <image> -- sh -lc '<command>'`) and the timer lives here. Command
+jobs need the `msb` CLI on the machine serving Libra:
 
 ```bash
 curl -fsSL https://install.microsandbox.dev | sh   # macOS / Linux; needs /dev/kvm on Linux, Apple Silicon on macOS
 # MSB_BIN=msb                                      # or an absolute path to the binary
 ```
 
-Prompt jobs need no extra binary: they call the same answer pipeline the UI uses, so the answer
-appears in the sidebar and the run links to it. A question is given **at least five minutes** — a
-search-backed answer usually takes two to five — because a shorter wait only ever reports a job that
-was going fine. If the wait does run out, the run is recorded as failed with what it had so far, and
-the answer keeps running in the background into its thread, which the run still links to. A job's
-optional `notify_url` gets a JSON `POST`
-when a run ends — an ntfy topic works out of the box.
+**A prompt job** is a saved question and needs no extra binary: it calls the same answer pipeline the
+UI uses, so the answer appears in the sidebar and the run links to it. A question is given **at least
+five minutes** — a search-backed answer usually takes two to five — because a shorter wait only ever
+reports a job that was going fine. If the wait does run out, the run is recorded as failed with what
+it had so far, and the answer keeps running in the background into its thread, which the run still
+links to.
+
+**Prompt jobs queue behind each other.** While one question is in flight, another job's question waits,
+saying `waiting for the model — Libra asks one question at a time` on its card, and its five minutes do
+not start counting until it has the model. That is deliberate: Ollama serves one request at a time by
+default and the free hosted keys rate-limit parallel ones, so two jobs due in the same minute used to
+report a timeout for an answer that was only standing in the model's queue. A question still waiting
+after fifteen minutes fails with that said, rather than being asked into a model nobody is answering.
+If you would rather have two jobs answering at once, give the model more slots — `OLLAMA_NUM_PARALLEL=2`
+for Ollama, or a second model in the pick list.
+
+Each job shows its **last run** in the list — status, how long ago, exit code, the thread a prompt
+job filed, and what it printed. Output is stored up to 20,000 characters and shown up to the first
+700, with **Whole output** for the rest and **N earlier runs** for the history; a run that failed
+shows its reason in a red rule above the output.
+
+### Telling you when a run ends
+
+A job's optional `notify_url` gets a JSON `POST` when a run ends — an ntfy topic works out of the box.
 
 **Telegram tells you about every run at once.** In **Settings → Notifications** put a bot token from
 [@BotFather](https://t.me/BotFather), send that bot `/start` once, press **Find my chat ID** — the bot
@@ -172,16 +203,11 @@ the status, the exit code and the tail of the output. Keys can stay out of the s
 
 A notification that fails is a log line, never a failed run, and an unset token posts nothing.
 
-**You do not have to write the cron expression.** Type one sentence into the Automator — *every
-weekday morning at 8 London time, tell me what changed in the Rust release notes* — and its helper
-fills the form: name, kind, schedule, timezone, and what the job should ask or run. It uses the light
-model, saves the job switched on, and lists every field it had to guess so you can adjust what it got
-wrong. A schedule it cannot read becomes 07:00 every day rather than an error, and a command job says
-so, because that line runs in a microVM on your server.
+### Command jobs inside a container
 
-**In Docker** the scheduler and prompt jobs need nothing extra — they are part of the Libra process.
-Command jobs are different: the image ships `msb`, but a microVM needs hardware virtualization, so
-the container must be given the hypervisor device:
+The scheduler and prompt jobs need nothing extra in Docker — they are part of the Libra process.
+Command jobs are different: the image ships `msb`, but a microVM needs hardware virtualization, so the
+container must be given the hypervisor device:
 
 ```yaml
 services:
@@ -198,6 +224,23 @@ doctor` — it reports the KVM device explicitly. Docker Desktop on macOS usuall
 on a Mac prefer running Libra with `cargo run` (microsandbox uses Apple's own Virtualization
 Framework there). If a command job cannot start its VM, the run log says so
 (`sandbox process exited (signal: 6 …)`) rather than pretending the job ran.
+
+## Configuration
+
+Everything in `.env.example` can also be changed at runtime from `/settings`. Precedence:
+
+```
+env vars  →  $LIBRA_DATA_DIR/settings.json  →  PUT /api/settings (live, no restart)
+```
+
+Settings are held in an `Arc<RwLock<Config>>`; a change swaps the `Arc` and each in-flight request
+keeps the snapshot it started with. No subsystem rebuild, no restart. Model providers and the models
+chosen from them are the exception — those come only from Settings, never from env vars.
+
+Search fallback order is per kind (`WEB_SEARCH_ORDER`, `NEWS_SEARCH_ORDER`, `IMAGE_SEARCH_ORDER`,
+`VIDEO_SEARCH_ORDER`). The Automator's own settings — `MSB_BIN`, `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_CHAT_ID`, `TELEGRAM_API_URL` — are in [.env.example](.env.example) and explained under
+[The Automator](#the-automator).
 
 ### Securing it
 
@@ -322,7 +365,9 @@ representative rather than real.
 - **A stuck reasoner is cut off, not fixed.** If the answer model repeats itself while thinking, the stream is stopped after a few cycles and the turn reports it — an endless trace used to burn the whole context and save an empty answer. The light-model calls (plan, filter, rerank) are bounded by a token cap instead, so a loop there costs one slow round and falls back.
 - **Embedding search is brute-force cosine** over SQLite BLOBs. Fine up to a few thousand chunks.
 - **Command jobs only run where `msb` does.** microsandbox is beta: it needs KVM on Linux and Apple Silicon on macOS, so a container running Libra wants `/dev/kvm` passed through to schedule anything. Without the binary a job records an error run that says so, rather than pretending it ran.
-- **The scheduler is a 20-second sweep**, not a realtime timer: a job fires within a tick of its minute, and a restart can delay one — missed runs are not caught up.
+- **A schedule comes back in the scheduler's own form.** You type `0 8 * * 1-5`; it is stored as `0 0 8 * * 2-6` — six fields, and weekdays counted the way the cron crate counts them, 1 = Sunday — and the job form shows the stored string. It round-trips, so editing a job never shifts the day again, but it is not what you typed.
+- **A prompt run reports failure at its deadline while the answer carries on.** The run is recorded as failed with what had arrived by then, and the thread finishes in the background, so a later look can show a complete answer under a failed run. That is deliberate: the alternative was losing the thread entirely.
+- **The scheduler is a 20-second sweep**, not a realtime timer: a job fires within a tick of its minute. A restart delays one — it runs on the next tick after the server is back, but several missed occurrences collapse into a single run.
 
 ## Acknowledgements
 
