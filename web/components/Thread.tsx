@@ -330,7 +330,7 @@ export default function Thread({ chatId, seed }: { chatId: string; seed: string 
   // bring a newly asked question to the top of the column
   useLayoutEffect(() => {
     if (!scrollTarget) return;
-    const head = turnEls.current.get(scrollTarget)?.querySelector<HTMLElement>(".ask-head");
+    const head = turnEls.current.get(scrollTarget)?.querySelector<HTMLElement>(".ask");
     const box = scroller.current;
     if (head && box) box.scrollTo({ top: Math.max(0, head.offsetTop - 32), behavior: "smooth" });
     setScrollTarget(null);

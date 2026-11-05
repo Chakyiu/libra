@@ -3,10 +3,10 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Answer from "@/components/Answer";
 import { MediaStrip, Widget } from "@/components/Widgets";
-import { CopyIcon, DownloadIcon } from "@/components/icons";
+import { CopyIcon, DownloadIcon, Mark } from "@/components/icons";
 import type { SearchResult } from "@/lib/api";
 import { answerMarkdown } from "@/lib/cite";
-import { askedAt, modelLabel, plural, sameQuestionKey, seconds, slug, toDate } from "@/lib/format";
+import { modelLabel, plural, sameQuestionKey, seconds, slug, stamp, toDate } from "@/lib/format";
 import { Turn, hasReferences, isStreaming, mediaOf, relatedOf, researchOf, sourcesOf, statsOf, widgetsOf } from "@/lib/turn";
 
 async function copyText(text: string) {
@@ -172,84 +172,106 @@ function TurnView({ turn, index, last, busy, fileNames, asked, minHeight, regist
   const searched =
     !docs && stats.searchQuery && sameQuestionKey(stats.searchQuery) !== sameQuestionKey(turn.question) ? stats.searchQuery : "";
   const fileList = turn.files.map((id) => fileNames.get(id)).filter(Boolean).join(", ");
+  const sent = toDate(turn.askedAt);
+  const when = streaming ? "just now" : stamp(sent);
 
   return (
     <section className="turn" data-turn={index} ref={ref} style={minHeight ? { minHeight } : undefined}>
-      <header className="ask-head">
-        <p className="kicker">{streaming ? "Asked just now" : askedAt(toDate(turn.askedAt))} · you</p>
-        <Question className={index ? "ask-head__q" : undefined}>{turn.question}</Question>
-        {!streaming && turn.phase !== "error" && (
-          <div className="ask-head__meta">
-            {docs ? (
-              <span className="meta" title={fileList}>
-                {plural(turn.files.length, "file")}
-              </span>
-            ) : (
-              hasReferences(turn.blocks) && <span className="meta">{plural(sources.length, "source")}</span>
-            )}
-            {stats.elapsedMs != null && (
-              <span className="meta">
-                {seconds(stats.elapsedMs)}
-                {stats.model ? ` · ${modelLabel(stats.model)}` : ""}
-              </span>
-            )}
-            {research.queries.length > 0 ? (
-              <span className="meta" title={research.queries.join("\n")}>
-                {depthName} · {plural(research.queries.length, "search")}
-              </span>
-            ) : (
-              searched && (
-                <span className="meta" title="What the engine searched for">
-                  searched “{searched}”
+      {turn.question && (
+        <div className={`ask${streaming ? " is-sent" : ""}`}>
+          <Question className="ask__q">{turn.question}</Question>
+          {(when || docs) && (
+            <div className="ask__meta">
+              {when && (
+                <time className="meta" dateTime={sent?.toISOString()}>
+                  {when}
+                </time>
+              )}
+              {docs && (
+                <span className="meta" title={fileList}>
+                  {plural(turn.files.length, "file")}
                 </span>
-              )
-            )}
-            {turn.phase === "stopped" && <span className="meta">stopped early</span>}
-          </div>
-        )}
-      </header>
-
-      {streaming && <Stages turn={turn} count={sources.length} onStop={onStop} />}
-      {streaming && research.queries.length > 0 && (
-        <div className="research">
-          <p className="kicker">
-            {depthName}
-            {research.rounds > 1 ? ` · round ${research.round} of ${research.rounds}` : ""}
-          </p>
-          <ul>
-            {research.queries.map((q) => (
-              <li key={q}>{q}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <Thinking text={turn.thought || ""} live={streaming} />
-
-      {widgets.map((b, i) => (
-        <Widget key={i} block={b} />
-      ))}
-      {images.length > 0 && <MediaStrip items={images} kind="images" />}
-      {videos.length > 0 && <MediaStrip items={videos} kind="videos" />}
-
-      {turn.answer && (
-        <Answer text={turn.answer} writing={turn.phase === "write"} turnKey={turn.key} count={sources.length} onCite={cite} onHover={hoverCite} />
-      )}
-
-      {turn.phase === "error" && (
-        <div className="callout callout--error" role="alert">
-          <b>This answer didn’t finish.</b> {turn.error}
-          {last && (
-            <div>
-              <button className="btn" onClick={() => onRetry(index)} disabled={busy}>
-                Try again
-              </button>
+              )}
             </div>
           )}
         </div>
       )}
-      {turn.phase === "done" && !turn.answer && !widgets.length && <p className="callout">No answer came back for this question.</p>}
 
-      {!streaming && turn.answer && <Actions turn={turn} sources={sources} />}
+      <div className="reply">
+        <div className="reply__head">
+          <span className="reply__avatar">
+            <Mark size={13} stroke={1.8} />
+          </span>
+          <div className="reply__by">
+            <span className="reply__who">Libra</span>
+            {!streaming && turn.phase !== "error" && (
+              <>
+                {!docs && hasReferences(turn.blocks) && <span className="meta">{plural(sources.length, "source")}</span>}
+                {stats.elapsedMs != null && (
+                  <span className="meta">
+                    {seconds(stats.elapsedMs)}
+                    {stats.model ? ` · ${modelLabel(stats.model)}` : ""}
+                  </span>
+                )}
+                {research.queries.length > 0 ? (
+                  <span className="meta" title={research.queries.join("\n")}>
+                    {depthName} · {plural(research.queries.length, "search")}
+                  </span>
+                ) : (
+                  searched && (
+                    <span className="meta" title="What the engine searched for">
+                      searched “{searched}”
+                    </span>
+                  )
+                )}
+                {turn.phase === "stopped" && <span className="meta">stopped early</span>}
+              </>
+            )}
+          </div>
+        </div>
+
+        {streaming && <Stages turn={turn} count={sources.length} onStop={onStop} />}
+        {streaming && research.queries.length > 0 && (
+          <div className="research">
+            <p className="kicker">
+              {depthName}
+              {research.rounds > 1 ? ` · round ${research.round} of ${research.rounds}` : ""}
+            </p>
+            <ul>
+              {research.queries.map((q) => (
+                <li key={q}>{q}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <Thinking text={turn.thought || ""} live={streaming} />
+
+        {widgets.map((b, i) => (
+          <Widget key={i} block={b} />
+        ))}
+        {images.length > 0 && <MediaStrip items={images} kind="images" />}
+        {videos.length > 0 && <MediaStrip items={videos} kind="videos" />}
+
+        {turn.answer && (
+          <Answer text={turn.answer} writing={turn.phase === "write"} turnKey={turn.key} count={sources.length} onCite={cite} onHover={hoverCite} />
+        )}
+
+        {turn.phase === "error" && (
+          <div className="callout callout--error" role="alert">
+            <b>This answer didn’t finish.</b> {turn.error}
+            {last && (
+              <div>
+                <button className="btn" onClick={() => onRetry(index)} disabled={busy}>
+                  Try again
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {turn.phase === "done" && !turn.answer && !widgets.length && <p className="callout">No answer came back for this question.</p>}
+
+        {!streaming && turn.answer && <Actions turn={turn} sources={sources} />}
+      </div>
 
       {last && !streaming && related.length > 0 && (
         <nav className="followups" aria-label="Follow-up questions">

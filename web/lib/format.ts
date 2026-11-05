@@ -33,13 +33,18 @@ export function threadTime(d: Date | null, group: Group) {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+/** "11:04", "yesterday 17:22", "Sep 14, 11:04" */
+export function stamp(d: Date | null) {
+  if (!d) return "";
+  const group = groupOf(d);
+  if (group === "Today") return clock(d);
+  if (group === "Yesterday") return `yesterday ${clock(d)}`;
+  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock(d)}`;
+}
+
 /** "Asked 11:04", "Asked yesterday 17:22", "Asked Sep 14, 11:04" */
 export function askedAt(d: Date | null) {
-  if (!d) return "Asked";
-  const group = groupOf(d);
-  if (group === "Today") return `Asked ${clock(d)}`;
-  if (group === "Yesterday") return `Asked yesterday ${clock(d)}`;
-  return `Asked ${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock(d)}`;
+  return d ? `Asked ${stamp(d)}` : "Asked";
 }
 
 export function shortDate(s?: string | null) {

@@ -21,6 +21,7 @@
   --warn:    oklch(60% 0.11 75);
 
   --sunken:  oklch(96% 0.004 95);
+  --bubble:  oklch(94.5% 0.007 90);
   --mark:    color-mix(in oklch, var(--accent) 10%, transparent);
   --press:   oklch(85% 0.006 95);
 
@@ -45,6 +46,7 @@
   --warn:    oklch(76% 0.11 80);
 
   --sunken:  oklch(20% 0.008 70);
+  --bubble:  oklch(25.5% 0.010 70);
   --mark:    color-mix(in oklch, var(--accent) 16%, transparent);
   --press:   oklch(28% 0.010 70);
 
