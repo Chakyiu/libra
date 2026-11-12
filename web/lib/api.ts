@@ -83,7 +83,7 @@ export type Settings = {
 
 export type AskEvent =
   | { type: "id"; id: string }
-  | { type: "a"; c: string }
+  | { type: "a"; c: string; r?: boolean }
   | { type: "t"; c: string }
   | { type: "b"; block: Block }
   | { type: "e" }

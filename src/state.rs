@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 pub enum Event {
     Id(String),
     AnswerChunk(String),
+    /// Replace the answer text already streamed. A reasoning model sometimes
+    /// plans the real reply and then emits a refusal; this swaps in the reply.
+    AnswerSet(String),
     /// A piece of the model's reasoning, streamed ahead of the answer.
     Thought(String),
     Block(Block),
@@ -23,6 +26,7 @@ impl Event {
         match self {
             Event::Id(id) => json!({ "type": "id", "id": id }),
             Event::AnswerChunk(c) => json!({ "type": "a", "c": c }),
+            Event::AnswerSet(c) => json!({ "type": "a", "c": c, "r": true }),
             Event::Thought(c) => json!({ "type": "t", "c": c }),
             Event::Block(b) => json!({ "type": "b", "block": b.to_value() }),
             Event::NeedLocation { precise } => json!({ "type": "loc", "precise": precise }),

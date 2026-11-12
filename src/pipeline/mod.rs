@@ -243,6 +243,57 @@ fn notes_tail(text: &str, max_chars: usize) -> String {
     text.chars().skip(count - max_chars).collect()
 }
 
+/// The start of the user message, where the question sits.
+fn task_head(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+/// A short reply that asks for the question instead of answering it.
+fn dodges_question(answer: &str) -> bool {
+    let a = answer.trim();
+    if a.is_empty() || a.chars().count() > 600 {
+        return false;
+    }
+    let lower = a.to_lowercase();
+    const CUES: &[&str] = &[
+        "don't have a specific question",
+        "do not have a specific question",
+        "don't have a question",
+        "do not have a question",
+        "no specific question",
+        "don't have any context",
+        "do not have any context",
+        "provide more details",
+        "provide more context",
+        "more context from you",
+        "what you'd like me to help",
+        "what you would like me to help",
+        "could you please clarify",
+        "could you clarify",
+        "please tell me more",
+        "i need more information",
+        "i need more context",
+        "what would you like me to",
+        "how can i help you",
+        "how may i help",
+        "请提供更多",
+        "請提供更多",
+        "没有具体问题",
+        "沒有具體問題",
+    ];
+    CUES.iter().any(|c| lower.contains(c))
+}
+
+fn question_is_specific(task: &str) -> bool {
+    let q = task
+        .lines()
+        .find_map(|line| line.strip_prefix("User question:"))
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .unwrap_or_else(|| task.trim());
+    q.chars().count() >= 12
+}
+
 fn store_thought(blocks: &mut Vec<Block>, thought: &str) {
     if thought.trim().is_empty() {
         return;
@@ -691,6 +742,20 @@ impl Pipeline {
             cls.need_web_search = false;
             cls.needs_image_results = false;
             cls.needs_video_results = false;
+        }
+        // "guide me" is the practical version of the question already on the table,
+        // not a request to paraphrase the previous reply.
+        if practical_follow_up(&req.query) {
+            from_history = false;
+            cls.need_web_search = true;
+            if search_query.trim().is_empty()
+                || same_ask(&search_query, &req.query)
+                || practical_follow_up(&search_query)
+            {
+                if let Some(prev) = previous_user_question(&req.message_history) {
+                    search_query = prev;
+                }
+            }
         }
         // "https://… 總結" asks for that page, including on a later turn. The
         // follow-up model otherwise treats 總結 as "rewrite the previous answer"
@@ -1436,6 +1501,13 @@ impl Pipeline {
             .iter()
             .find(|m| m.role == "system")
             .map(|m| m.content.clone());
+        let task = request
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
         let temperature = request.temperature;
         let mut rx = match llm.stream(request).await {
             Ok(rx) => rx,
@@ -1533,6 +1605,7 @@ impl Pipeline {
                     tx,
                     allow_notes,
                     fallback,
+                    &task,
                 )
                 .await;
             if result.is_err() && !line.is_empty() {
@@ -1554,8 +1627,16 @@ impl Pipeline {
                     tx,
                     allow_notes,
                     if truncated { BUDGET_USED } else { NO_TEXT },
+                    &task,
                 )
                 .await;
+        }
+        if body && allow_notes && dodges_question(answer) && question_is_specific(&task) {
+            if let Some(better) = self.straight_answer(llm, &task, temperature).await {
+                answer.clear();
+                answer.push_str(&better);
+                Self::emit(tx, Event::AnswerSet(better));
+            }
         }
         Ok(())
     }
@@ -1575,11 +1656,13 @@ impl Pipeline {
         tx: &UnboundedSender<Event>,
         allow_notes: bool,
         fallback: &str,
+        task: &str,
     ) -> Result<(), String> {
         if !allow_notes || mind.text.trim().is_empty() || turn.cancel.load(Ordering::Acquire) {
             return Err(fallback.to_string());
         }
-        let notes = notes_tail(mind.text, 8_000);
+        let notes = notes_tail(mind.text, 6_000);
+        let asked = task_head(task, 8_000);
         let mut messages = Vec::new();
         if let Some(system) = system {
             messages.push(msg("system", system));
@@ -1587,7 +1670,7 @@ impl Pipeline {
         messages.push(msg(
             "user",
             format!(
-                "Write the reply the user will read. They have not seen these notes. Do not plan again.\n\nNotes:\n{notes}\n\n/no_think"
+                "Answer the user question in the message below. If they asked for a script or for commands, include them in full. Do not ask them to repeat the question. Do not plan again.\n\nUser message:\n{asked}\n\nNotes:\n{notes}\n\n/no_think"
             ),
         ));
         tracing::info!(model = %llm.model, "answer was only in the notes; writing the reply");
@@ -1608,6 +1691,33 @@ impl Pipeline {
             false,
         ))
         .await
+    }
+
+    /// The trace planned the reply, and the answer channel asked for the question again.
+    async fn straight_answer(&self, llm: &Llm, task: &str, temperature: Option<f32>) -> Option<String> {
+        let asked = task_head(task, 8_000);
+        let text = llm
+            .complete(ChatRequest {
+                messages: vec![
+                    msg(
+                        "system",
+                        "You are Libra. Answer the user question in the message. If they asked for a script, write the complete runnable script in one fenced block. If they asked how to do something, give the commands they would type and what each one shows. Take the subject from the conversation when the question is short, such as the operating system or the tool. If no source was found, still answer and say in one sentence that no page was checked. Do not ask the user to repeat the question. Do not describe your plan.",
+                    ),
+                    msg("user", format!("{asked}\n\n/no_think")),
+                ],
+                temperature,
+                max_tokens: Some(4_096),
+                json_mode: false,
+                no_think: true,
+            })
+            .await
+            .ok()?;
+        let text = text.trim();
+        if text.is_empty() || dodges_question(text) {
+            None
+        } else {
+            Some(text.to_string())
+        }
     }
 
     /// The section list for a long-form report. Fewer than three sections is not a report,
@@ -2466,8 +2576,55 @@ fn prior_block(history: &[Msg]) -> String {
         body.push('…');
     }
     format!(
-        "\nPrevious answer in this conversation:\n{body}\n\nThe user can see that answer. If they asked to translate, summarize, shorten, rewrite, or explain it, produce that result from the text above. Keep its citation numbers when you translate. If they asked a new question, answer the new question and use the previous answer as context.\n"
+        "\nPrevious answer in this conversation:\n{body}\n\nThe user can see that answer. If they asked to translate, summarize, shorten, or rewrite it, produce that result from the text above. Keep its citation numbers when you translate. If they asked to be shown how, or asked a new question, answer that. Use the previous answer as context, and do not repeat it in different words.\n"
     )
+}
+
+/// "guide me" after a thin answer. The subject is the previous question, and it needs a search.
+fn practical_follow_up(query: &str) -> bool {
+    let q = query
+        .trim()
+        .trim_end_matches(['?', '!', '.', '。', '？', '！'])
+        .to_lowercase();
+    const CUES: &[&str] = &[
+        "guide me",
+        "guide us",
+        "show me how",
+        "show me the steps",
+        "show me the commands",
+        "walk me through",
+        "walk me through it",
+        "the steps",
+        "the commands",
+        "give me the steps",
+        "give me the commands",
+        "more detail",
+        "more details",
+        "go deeper",
+        "be specific",
+        "be concrete",
+        "how exactly",
+        "exact steps",
+        "教我",
+        "帶我做",
+        "带我做",
+        "具体一点",
+        "具體一點",
+        "详细一点",
+        "詳細一點",
+    ];
+    CUES.iter().any(|c| q == *c)
+}
+
+fn same_ask(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+}
+
+fn previous_user_question(history: &[Msg]) -> Option<String> {
+    history.iter().rev().find(|m| m.role == "user").and_then(|m| {
+        let q = m.content.trim();
+        (!q.is_empty()).then(|| q.to_string())
+    })
 }
 
 /// A short request whose only job is to transform the previous answer.
@@ -2757,6 +2914,25 @@ mod tests {
         assert!(!transform_only("Apple Huxe reverse acqui-hire"));
         assert!(!transform_only("translate the EU AI Act"));
         assert!(!transform_only("中文新聞"));
+        let dodge = "I don't have a specific question or context from you yet. Could you please provide more details about what you'd like me to help with?";
+        assert!(dodges_question(dodge));
+        assert!(!dodges_question("Run `sar -u 1 5` to sample CPU use over five seconds."));
+        assert!(question_is_specific(
+            "User question: write me script to check overall health\n"
+        ));
+        assert!(!question_is_specific("User question: help\n"));
+        assert!(practical_follow_up("guide me"));
+        assert!(practical_follow_up("show me how"));
+        assert!(practical_follow_up("教我"));
+        assert!(!practical_follow_up("how to check rhel 8.10 health"));
+        assert_eq!(
+            previous_user_question(&[
+                msg("user", "how to check rhel 8.10 health?"),
+                msg("assistant", "Use SAR."),
+            ])
+            .as_deref(),
+            Some("how to check rhel 8.10 health?")
+        );
         let history = vec![
             msg("user", "what did Apple do with Huxe?"),
             msg(

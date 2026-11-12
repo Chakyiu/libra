@@ -287,6 +287,7 @@ async fn run_prompt(app: &Arc<App>, job: &Job, run_id: i64) -> anyhow::Result<Ou
             }
             event = rx.recv() => {
                 match event {
+                    Some(Event::AnswerSet(text)) => answer = text,
                     Some(Event::AnswerChunk(chunk)) => answer.push_str(&chunk),
                     Some(Event::Close(message)) => {
                         failure = message;

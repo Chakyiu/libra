@@ -182,7 +182,14 @@ export function startRun(opts: {
         },
         (e) => {
           if (ctrl.signal.aborted) return;
-          if (e.type === "a") {
+          if (e.type === "a" && e.r) {
+            pending = "";
+            patch((t) => ({
+              ...t,
+              answer: e.c,
+              phase: t.phase === "error" ? t.phase : ("write" as const),
+            }));
+          } else if (e.type === "a") {
             pending += e.c;
             if (!frame) frame = requestAnimationFrame(flush);
           } else if (e.type === "t") {
