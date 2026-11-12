@@ -1,8 +1,10 @@
 "use client";
 
 import { Fragment, createContext, memo, useContext, useMemo } from "react";
-import Markdown, { MarkdownToJSX } from "markdown-to-jsx";
+import Markdown, { MarkdownToJSX, RuleType } from "markdown-to-jsx";
+import FileBlock from "@/components/FileBlock";
 import { linkCitations, parseCiteHref, trimPartial } from "@/lib/cite";
+import { fileFromLang, promoteFiles } from "@/lib/files";
 import { useLit } from "@/lib/lit";
 
 type CiteHandlers = {
@@ -80,6 +82,13 @@ const OPTIONS: MarkdownToJSX.Options = {
     table: { component: Table },
     img: { props: { loading: "lazy", referrerPolicy: "no-referrer" } },
   },
+  renderRule(next, node, _renderChildren, state) {
+    if (node.type === RuleType.codeBlock) {
+      const file = fileFromLang(node.lang);
+      if (file) return <FileBlock key={state.key} name={file.name} text={node.text} />;
+    }
+    return next();
+  },
 };
 
 const Prose = memo(function Prose({ source }: { source: string }) {
@@ -93,7 +102,7 @@ type AnswerProps = CiteHandlers & {
 
 /** The answer column: serif prose whose [n] citations become chips tied to the sources rail. */
 export default function Answer({ text, writing, turnKey, count, onCite, onHover }: AnswerProps) {
-  const source = useMemo(() => linkCitations(writing ? trimPartial(text) : text), [text, writing]);
+  const source = useMemo(() => promoteFiles(linkCitations(writing ? trimPartial(text) : text)), [text, writing]);
   const handlers = useMemo(() => ({ turnKey, count, onCite, onHover }), [turnKey, count, onCite, onHover]);
   return (
     <CiteContext.Provider value={handlers}>

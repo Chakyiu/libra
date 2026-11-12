@@ -255,7 +255,7 @@
   margin: 1.15em 0 0.35em;
 }
 
-.answer > :first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.answer > :first-child:not(.file) { margin-top: 0; padding-top: 0; border-top: 0; }
 
 .answer strong { font-weight: 600; }
 
@@ -281,6 +281,62 @@
   overflow-x: auto;
 }
 .answer pre code { font-size: inherit; background: none; border: 0; padding: 0; }
+
+/* a file the user asked for, with copy and download */
+.file {
+  margin: 0 0 1.2em;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  min-width: 0;
+  overflow: hidden;
+}
+.file__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+  padding: 2px 4px 2px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.file__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: calc(12.5 / 15 * 1rem);
+  color: var(--fg);
+}
+.file__kind {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: calc(10.5 / 15 * 1rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.file__actions {
+  display: flex;
+  margin-left: auto;
+}
+.file__bar .btn {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: calc(12.5 / 15 * 1rem);
+}
+.answer .file__body {
+  margin: 0;
+  max-height: 28rem;
+  overflow: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  border: 0;
+  border-radius: 0;
+  background: var(--sunken);
+}
 
 .answer ul,
 .answer ol { margin: 0 0 0.7em; padding-left: 1.1em; }
@@ -347,7 +403,7 @@
 .answer img { max-width: 100%; height: auto; border: 1px solid var(--border); }
 
 /* the writing caret rides on the last block while the answer streams */
-.answer.is-writing > :last-child:not(ul):not(ol):not(pre):not(table):not(.answer__table)::after,
+.answer.is-writing > :last-child:not(ul):not(ol):not(pre):not(table):not(.answer__table):not(.file)::after,
 .answer.is-writing > ul:last-child > li:last-child::after,
 .answer.is-writing > ol:last-child > li:last-child::after {
   content: '';

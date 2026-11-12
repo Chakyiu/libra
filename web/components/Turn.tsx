@@ -5,34 +5,10 @@ import Answer from "@/components/Answer";
 import { MediaStrip, Widget } from "@/components/Widgets";
 import { CopyIcon, DownloadIcon, Mark } from "@/components/icons";
 import type { SearchResult } from "@/lib/api";
+import { copyText, download } from "@/lib/clipboard";
 import { answerMarkdown } from "@/lib/cite";
 import { modelLabel, plural, sameQuestionKey, seconds, slug, stamp, toDate } from "@/lib/format";
 import { Turn, hasReferences, isStreaming, mediaOf, relatedOf, researchOf, sourcesOf, statsOf, widgetsOf } from "@/lib/turn";
-
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    // clipboard API needs a secure context; fall back for plain-http installs
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    ta.remove();
-  }
-}
-
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function Thinking({ text, live }: { text: string; live: boolean }) {
   const box = useRef<HTMLPreElement>(null);
@@ -127,7 +103,10 @@ function Actions({ turn, sources }: { turn: Turn; sources: SearchResult[] }) {
         <CopyIcon />
         {copied ? "Copied" : "Copy with citations"}
       </button>
-      <button className="btn btn--quiet" onClick={() => download(`${slug(turn.question)}.md`, answerMarkdown(turn.answer, sources, turn.question))}>
+        <button
+          className="btn btn--quiet"
+          onClick={() => download(`${slug(turn.question)}.md`, answerMarkdown(turn.answer, sources, turn.question), "text/markdown;charset=utf-8")}
+        >
         <DownloadIcon />
         Export .md
       </button>
