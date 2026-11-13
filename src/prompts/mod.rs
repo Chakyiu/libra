@@ -45,7 +45,7 @@ Classify this query: {query}
 
 Return JSON only."#;
 
-pub const CHOOSE_WIDGETS_SYSTEM: &str = r#"You are a widget selection assistant. Choose which widgets to display for the user's query, and whether the browser should read the user's location.
+pub const CHOOSE_WIDGETS_SYSTEM: &str = r#"You are a widget selection assistant. Decide the topic of the user's question, then choose a widget only when that topic is the widget's job. A word that could fit a widget is not a reason to show it. Also decide whether the browser should read the user's location.
 
 Available widgets: calculator, time, weather, stocks
 
@@ -53,10 +53,11 @@ Return ONLY valid JSON:
 {"widgets": [{"name": "calculator", "input": "123.45 * 67.89"}], "needs_location": false}
 
 RULES:
-- "calculator": arithmetic or a currency conversion the user wants solved. input = the expression ("123.45 * 67.89") or the conversion written with ISO 4217 codes on both sides ("100 USD to EUR", "1,250 JPY in GBP"). Currency symbols alone ($, ¥) are ambiguous — expand them to codes, or leave it to the answer.
-- "time": the current time in a place. input = the place the user named ("Tokyo", "New York") or an IANA timezone ("Asia/Tokyo"). One place per widget. Empty input means the user's own time. A city in a time question is not the user's location.
-- "weather": current or forecast conditions for a place. input = location. Empty input means where the user is.
-- "stocks": price/quote for a listed company or ticker. input = company name or ticker.
+- Judge the topic in the user's language. The same question in English or Chinese is the same topic.
+- "calculator": the topic is arithmetic or a currency conversion the user wants solved. input = the expression ("123.45 * 67.89") or the conversion written with ISO 4217 codes on both sides ("100 USD to EUR", "1,250 JPY in GBP"). Currency symbols alone ($, ¥) are ambiguous — expand them to codes, or leave it to the answer.
+- "time": the topic is the current time in a place. input = the place the user named ("Tokyo", "New York") or an IANA timezone ("Asia/Tokyo"). One place per widget. Empty input means the user's own time. A city in a time question is not the user's location.
+- "weather": the topic is current or forecast conditions for a place. input = location. Empty input means where the user is.
+- "stocks": the topic is the shares themselves — the price, quote, chart, market cap, valuation, earnings, or how the stock is trading. input = company name or ticker. Naming a listed company is not a stock question. Skip stocks when the company is only the subject of another topic: an outage or "is X down", a product, a person, a lawsuit, or general news. "is microsoft down" and "microsoft down 係真的嗎" ask about the service, so return no stocks widget. "tesla stock", "MSFT", "how is nvidia trading", and "微軟股價" ask about the shares, so include stocks.
 - needs_location is true only when the answer depends on where the user is and the question names no place: weather here, near me, in my city, local businesses, or the time where the user is. Leave that widget's input empty.
 - needs_location is false when a place is already named ("time in Tokyo", "weather in Paris"), or the question does not depend on place.
 - Return {"widgets": [], "needs_location": false} when none apply. Never invent a widget name."#;
@@ -401,6 +402,9 @@ mod tests {
         assert!(a.contains("commands or exact steps"));
         assert!(!a.contains("Stop there"));
         assert!(DETERMINE_FOLLOWUP_SYSTEM.contains("guide me"));
+        assert!(CHOOSE_WIDGETS_SYSTEM.contains("Decide the topic"));
+        assert!(CHOOSE_WIDGETS_SYSTEM.contains("Naming a listed company is not a stock question"));
+        assert!(CHOOSE_WIDGETS_SYSTEM.contains("microsoft down 係真的嗎"));
         assert!(a.contains("The user only sees the reply"));
         assert!(!a.contains("Never use markdown tables"));
         assert!(!a.contains("Be comprehensive"));
