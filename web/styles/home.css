@@ -62,10 +62,12 @@
   background: none;
   border: 0;
   cursor: pointer;
-  transition: padding-left 140ms ease, background 140ms;
+  user-select: none;
+  touch-action: manipulation;
+  transition: background 140ms;
 }
 .starters a:hover,
-.starters button:hover { padding-left: 8px; background: var(--sunken); }
+.starters button:hover { background: var(--sunken); }
 
 .starters a span,
 .starters button span {

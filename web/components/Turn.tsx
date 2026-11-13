@@ -26,15 +26,15 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
   }, [text, open]);
   if (!text.trim()) return null;
   return (
-    <details
-      className="think"
-      open={open}
-      onToggle={(e) => {
-        const next = e.currentTarget.open;
-        if (next !== open) setOpen(next);
-      }}
-    >
-      <summary>Thinking</summary>
+    <details className="think" open={open}>
+      <summary
+        onClick={(e) => {
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
+      >
+        Thinking
+      </summary>
       <pre ref={box}>{text}</pre>
     </details>
   );

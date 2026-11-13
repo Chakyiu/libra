@@ -172,12 +172,14 @@ a { color: inherit; }
   gap: 7px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 120ms, border-color 120ms, transform 80ms;
+  user-select: none;
+  touch-action: manipulation;
+  transition: background 120ms, border-color 120ms;
 }
 
 .btn svg { flex: none; }
 .btn:hover { background: var(--sunken); border-color: color-mix(in oklch, var(--border) 40%, var(--fg) 25%); }
-.btn:active { transform: translateY(1px); background: var(--press); }
+.btn:active { background: var(--press); }
 
 .btn--primary {
   background: var(--fg);
@@ -262,6 +264,8 @@ a { color: inherit; }
   padding: 7px 13px;
   min-height: 34px;
   cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
   transition: background 120ms, color 120ms;
 }
 .seg button:last-child { border-right: 0; }
@@ -318,6 +322,8 @@ textarea.field {
   align-items: center;
   gap: 6px;
   cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
   transition: color 120ms, background 120ms, border-color 120ms;
 }
 .chip:hover { color: var(--fg); background: var(--sunken); }

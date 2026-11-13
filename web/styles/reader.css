@@ -631,6 +631,8 @@
   border-radius: 3px;
   padding: 4px 8px;
   cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
 }
 .quote__ranges button:hover { color: var(--fg); background: var(--sunken); }
 .quote__ranges button[aria-pressed="true"] {
@@ -818,6 +820,8 @@
   border: 0;
   border-bottom: 1px solid transparent;
   cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
   transition: border-color 120ms, color 120ms;
 }
 

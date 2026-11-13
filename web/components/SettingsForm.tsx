@@ -961,7 +961,10 @@ export default function SettingsForm() {
   const instance = useInstance();
   const params = useSearchParams();
   const asked = params.get("tab");
-  const tab: Tab = TABS.find((t) => t.id === asked)?.id ?? "search";
+  const fromUrl: Tab = TABS.find((t) => t.id === asked)?.id ?? "search";
+  // The URL is updated with replaceState, which the router notices a tick later.
+  // The section has to change on the click itself, or the first press looks ignored.
+  const [tab, setTab] = useState<Tab>(fromUrl);
   const [saved, setSaved] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -983,8 +986,15 @@ export default function SettingsForm() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    setTab(fromUrl);
+  }, [fromUrl]);
+
   // the tab lives in the URL so other screens can link straight to it (?tab=providers)
-  const choose = (next: Tab) => window.history.replaceState(null, "", `?tab=${next}`);
+  const choose = (next: Tab) => {
+    setTab(next);
+    window.history.replaceState(null, "", `?tab=${next}`);
+  };
 
   const set: SetField = useCallback((key, value) => setDraft((d) => (d ? { ...d, [key]: value } : d)), []);
   const setProviders = useCallback(

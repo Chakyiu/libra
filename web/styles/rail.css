@@ -196,7 +196,10 @@
   box-shadow: 0 -6px 26px color-mix(in oklch, var(--fg) 14%, transparent);
   transform: translateY(calc(100% + 40px));
   transition: transform 280ms cubic-bezier(0.22, 0.8, 0.3, 1);
+  pointer-events: none;
 }
+.sheet[data-state='half'],
+.sheet[data-state='full'] { pointer-events: auto; }
 .sheet[data-state='half'] { transform: translateY(46%); }
 .sheet[data-state='full'] { transform: translateY(0); }
 .sheet.is-dragging { transition: none; }

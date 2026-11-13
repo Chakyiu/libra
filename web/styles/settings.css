@@ -28,6 +28,8 @@
   padding: 8px 0 8px 14px;
   min-height: 36px;
   cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
   transition: color 120ms, border-color 120ms;
 }
 .settings__nav button:hover { color: var(--fg); }

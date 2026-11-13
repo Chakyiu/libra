@@ -22,6 +22,25 @@ function Frame({ children }: { children: React.ReactNode }) {
   }, []);
   const closeDrawer = useCallback(() => setDrawer(false), []);
 
+  // A focused text field blurs on the press. That reflow can move the control
+  // before mouseup, so the click never lands and the next press is the one that works.
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("input, textarea, select, option")) return;
+      const control = target.closest("a, button, summary, [role='tab']");
+      if (!control) return;
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement) || active === control || control.contains(active)) return;
+      if (!/^(INPUT|TEXTAREA)$/.test(active.tagName) && !active.isContentEditable) return;
+      e.preventDefault();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
