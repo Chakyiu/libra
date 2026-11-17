@@ -15,6 +15,10 @@ One binary serves the API and the pre-built UI.
 <a href="LICENSE">MIT</a> · <a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How it works</a> · <a href="#the-automator">The Automator</a> · <a href="#http-api">HTTP API</a> · <a href="#configuration">Configuration</a>
 </p>
 
+<p align="center">
+<a href="https://buymeacoffee.com/chakyiu"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40"></a>
+</p>
+
 ---
 
 ## What you get
