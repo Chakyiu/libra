@@ -163,16 +163,15 @@ async fn resolve(http: &Client, input: &str, query: &str) -> Option<Hit> {
     let direct = (!text.contains(' '))
         .then(|| normalize_symbol(&text))
         .filter(|sym| is_ticker(sym));
-    if single_token(input, query).is_some_and(|token| written_as_ticker(&token)) {
-        if let Some(sym) = direct.clone() {
-            if let Some((class, info)) = confirmed(http, &sym).await {
-                return Some(Hit {
-                    symbol: sym,
-                    class: class.to_string(),
-                    info: Some(info),
-                });
-            }
-        }
+    if single_token(input, query).is_some_and(|token| written_as_ticker(&token))
+        && let Some(sym) = direct.clone()
+        && let Some((class, info)) = confirmed(http, &sym).await
+    {
+        return Some(Hit {
+            symbol: sym,
+            class: class.to_string(),
+            info: Some(info),
+        });
     }
     if let Some((symbol, class)) = search_symbol(http, &text).await {
         return Some(Hit {
@@ -603,9 +602,8 @@ fn point_unix(x: i64, label: &str) -> i64 {
     };
     if hour_in_new_york(secs) == Some(hour) {
         secs
-    } else if hour_in_new_york(shifted) == Some(hour) {
-        shifted
     } else {
+        // Both fallbacks return `shifted`; the old second branch was the same value.
         shifted
     }
 }
@@ -872,14 +870,13 @@ fn lookup_text(input: &str, query: &str) -> String {
 
 fn normalize_symbol(raw: &str) -> String {
     let s = raw.trim().to_ascii_uppercase().replace('/', ".");
-    if let Some((head, tail)) = s.split_once('-') {
-        if (1..=5).contains(&head.len())
-            && head.chars().all(|c| c.is_ascii_uppercase())
-            && tail.len() == 1
-            && tail.chars().all(|c| c.is_ascii_uppercase())
-        {
-            return format!("{head}.{tail}");
-        }
+    if let Some((head, tail)) = s.split_once('-')
+        && (1..=5).contains(&head.len())
+        && head.chars().all(|c| c.is_ascii_uppercase())
+        && tail.len() == 1
+        && tail.chars().all(|c| c.is_ascii_uppercase())
+    {
+        return format!("{head}.{tail}");
     }
     s
 }
@@ -1040,10 +1037,9 @@ fn suffixed(raw: &str) -> Option<f64> {
         (x, 1e12)
     } else if let Some(x) = t.strip_suffix(['B', 'b']) {
         (x, 1e9)
-    } else if let Some(x) = t.strip_suffix(['M', 'm']) {
-        (x, 1e6)
     } else {
-        return None;
+        let x = t.strip_suffix(['M', 'm'])?;
+        (x, 1e6)
     };
     Some(n.trim().parse::<f64>().ok()? * mult)
 }

@@ -211,10 +211,10 @@ pub struct Db {
 
 impl Db {
     pub async fn connect(path: &str) -> anyhow::Result<Self> {
-        if let Some(parent) = std::path::Path::new(path).parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).ok();
-            }
+        if let Some(parent) = std::path::Path::new(path).parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).ok();
         }
         let opts = SqliteConnectOptions::from_str(path)
             .with_context(|| format!("invalid sqlite path {path}"))?
@@ -477,6 +477,7 @@ impl Db {
 
     /// Update the in-progress answer. A later `write` cannot revive a turn already marked stopped,
     /// and `done` / `error` cannot overwrite `stopped`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn write_turn(
         &self,
         chat_id: &str,
@@ -918,7 +919,9 @@ fn encode_embedding(v: &[f32]) -> Vec<u8> {
 
 fn decode_embedding(bytes: &[u8]) -> Vec<f32> {
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect()
 }

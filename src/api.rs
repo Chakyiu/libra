@@ -74,6 +74,7 @@ pub fn router(app: Arc<App>) -> Router {
 /// `LIBRA_AUTH_TOKEN` turns the API from "open on my LAN" into "needs the token".
 /// The static UI stays public — it is just an app shell; every route that reads or
 /// writes data lives under /api and is gated here.
+#[allow(clippy::result_large_err)]
 async fn require_token(
     State(app): State<Arc<App>>,
     req: Request,

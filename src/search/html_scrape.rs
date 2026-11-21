@@ -32,12 +32,10 @@ fn clean_url(raw: &str) -> String {
             .collect();
         if let Ok(bytes) =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(token.trim_start_matches('='))
+            && let Ok(url) = String::from_utf8(bytes)
+            && url.starts_with("http")
         {
-            if let Ok(url) = String::from_utf8(bytes) {
-                if url.starts_with("http") {
-                    return url;
-                }
-            }
+            return url;
         }
     }
     raw.to_string()
