@@ -44,7 +44,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # commit SHA tag always; a moving `main` tag on branches; semver tags for `v*`.
+      # commit SHA tag always; a moving `main` tag on branches; semver tags for `v*`;
+      # and `latest`, which follows the default branch only, so a `v*` run cannot
+      # move it away from the newest `main` build.
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -52,6 +54,7 @@ jobs:
           tags: |
             type=sha,format=long
             type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       - uses: docker/build-push-action@v6
