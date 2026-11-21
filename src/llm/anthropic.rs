@@ -90,18 +90,16 @@ pub fn spawn_stream(
                             Some("content_block_delta") => {
                                 if let Some(t) =
                                     v.pointer("/delta/thinking").and_then(|t| t.as_str())
+                                    && !t.is_empty()
+                                    && tx.send(Delta::Thought(t.to_string())).is_err()
                                 {
-                                    if !t.is_empty()
-                                        && tx.send(Delta::Thought(t.to_string())).is_err()
-                                    {
-                                        return;
-                                    }
+                                    return;
                                 }
-                                if let Some(t) = v.pointer("/delta/text").and_then(|t| t.as_str()) {
-                                    if !t.is_empty() && tx.send(Delta::Text(t.to_string())).is_err()
-                                    {
-                                        return;
-                                    }
+                                if let Some(t) = v.pointer("/delta/text").and_then(|t| t.as_str())
+                                    && !t.is_empty()
+                                    && tx.send(Delta::Text(t.to_string())).is_err()
+                                {
+                                    return;
                                 }
                             }
                             Some("error") => {
@@ -133,6 +131,7 @@ pub fn spawn_stream(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn call(
     http: &Client,
     base: &str,

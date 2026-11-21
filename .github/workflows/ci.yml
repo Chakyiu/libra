@@ -1,0 +1,65 @@
+name: CI
+
+# Nothing ran the Rust suite before this file. It is the only thing that guards
+# prompts, JSON extraction, chunking, docx parsing, config and widgets, and it was
+# red on arrival (see the cleanup commit), so it is worth a gate of its own.
+on: [push, pull_request, workflow_dispatch]
+
+# A second push to the same branch makes the first run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust (${{ matrix.check }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One leg failing must not hide the others: a formatting slip and a broken
+      # test should both show up in the same run.
+      fail-fast: false
+      matrix:
+        check: [fmt, clippy, test]
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned on purpose: a new stable rustc brings new clippy lints, which would turn
+      # this check red without a code change. Bump it deliberately.
+      - uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.check }}
+      - if: matrix.check == 'fmt'
+        run: cargo fmt --check
+      - if: matrix.check == 'clippy'
+        run: cargo clippy --all-targets -- -D warnings
+      # The three `#[ignore]` tests in src/widgets/{currency,stocks}.rs call Frankfurter
+      # and Nasdaq; they stay ignored so CI cannot depend on a third party being up.
+      - if: matrix.check == 'test'
+        run: cargo test
+
+  web:
+    name: web (next static export)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      # vitest runs in a node environment (no browser); it renders to static markup.
+      - run: npm test
+        working-directory: web
+      # `output: export` in web/next.config.js, so this needs no backend running.
+      - run: npm run build
+        working-directory: web

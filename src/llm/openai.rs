@@ -55,10 +55,10 @@ fn clear_reasoning_controls(body: &mut Value) -> bool {
 fn thought_delta(v: &Value) -> Option<String> {
     let delta = v.pointer("/choices/0/delta")?;
     for key in ["reasoning", "reasoning_content"] {
-        if let Some(s) = delta.get(key).and_then(|c| c.as_str()) {
-            if !s.is_empty() {
-                return Some(s.to_string());
-            }
+        if let Some(s) = delta.get(key).and_then(|c| c.as_str())
+            && !s.is_empty()
+        {
+            return Some(s.to_string());
         }
     }
     let details = delta.get("reasoning_details")?.as_array()?;
@@ -199,18 +199,18 @@ pub fn spawn_stream(
                                 truncated = true;
                             }
                         }
-                        if let Some(text) = thought_delta(&v) {
-                            if tx.send(Delta::Thought(text)).is_err() {
-                                return;
-                            }
+                        if let Some(text) = thought_delta(&v)
+                            && tx.send(Delta::Thought(text)).is_err()
+                        {
+                            return;
                         }
                         if let Some(text) = v
                             .pointer("/choices/0/delta/content")
                             .and_then(|c| c.as_str())
+                            && !text.is_empty()
+                            && tx.send(Delta::Text(text.to_string())).is_err()
                         {
-                            if !text.is_empty() && tx.send(Delta::Text(text.to_string())).is_err() {
-                                return;
-                            }
+                            return;
                         }
                     }
                     // [DONE] is a clean end. Stop so the socket close after it
@@ -237,6 +237,7 @@ pub fn spawn_stream(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn call(
     http: &Client,
     base: &str,

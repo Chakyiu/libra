@@ -252,15 +252,15 @@ fn resolve_one(candidate: &str, original: &str) -> Option<Resolved> {
 }
 
 fn from_here(here: Option<&Here>) -> Resolved {
-    if let Some(h) = here {
-        if let Ok(tz) = h.timezone.parse::<Tz>() {
-            let place = if h.label.trim().is_empty() {
-                city_label(tz)
-            } else {
-                h.label.trim().to_string()
-            };
-            return stamp(&place, tz);
-        }
+    if let Some(h) = here
+        && let Ok(tz) = h.timezone.parse::<Tz>()
+    {
+        let place = if h.label.trim().is_empty() {
+            city_label(tz)
+        } else {
+            h.label.trim().to_string()
+        };
+        return stamp(&place, tz);
     }
     let local = chrono::Local::now();
     Resolved {
@@ -307,7 +307,7 @@ fn place_name(input: &str, tz: Tz) -> String {
     } else {
         tidy
     };
-    if tidy.chars().any(|c| !c.is_ascii()) {
+    if !tidy.is_ascii() {
         let city = tidy.split(',').next().unwrap_or(tidy.as_str()).trim();
         if city.is_empty() {
             city_label(tz)
@@ -418,10 +418,10 @@ fn parse_zone(raw: &str) -> Option<Tz> {
         return Some(tz);
     }
     let underscored = raw.replace(' ', "_");
-    if underscored != raw {
-        if let Ok(tz) = underscored.parse::<Tz>() {
-            return Some(tz);
-        }
+    if underscored != raw
+        && let Ok(tz) = underscored.parse::<Tz>()
+    {
+        return Some(tz);
     }
     let parts: Vec<&str> = raw.split_whitespace().collect();
     if parts.len() == 2 {
@@ -471,10 +471,9 @@ fn parse_offset(input: &str) -> Option<chrono::FixedOffset> {
     };
     let (sign, body) = if let Some(body) = rest.strip_prefix('+') {
         (1_i32, body)
-    } else if let Some(body) = rest.strip_prefix('-') {
-        (-1, body)
     } else {
-        return None;
+        let body = rest.strip_prefix('-')?;
+        (-1, body)
     };
     if body.is_empty() {
         return None;

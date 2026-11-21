@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,13 +152,13 @@ impl Config {
         dir.join("libra")
     }
 
-    pub(crate) fn defaults(data_dir: &PathBuf) -> Self {
+    pub(crate) fn defaults(data_dir: &Path) -> Self {
         Self {
             port: std::env::var("PORT")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3001),
-            data_dir: data_dir.clone(),
+            data_dir: data_dir.to_path_buf(),
             db_path: data_dir.join("libra.db"),
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
@@ -251,11 +251,11 @@ impl Config {
         }
     }
 
-    fn settings_file(data_dir: &PathBuf) -> PathBuf {
+    fn settings_file(data_dir: &Path) -> PathBuf {
         data_dir.join("settings.json")
     }
 
-    pub fn read_settings_file(data_dir: &PathBuf) -> anyhow::Result<Option<serde_json::Value>> {
+    pub fn read_settings_file(data_dir: &Path) -> anyhow::Result<Option<serde_json::Value>> {
         let path = Self::settings_file(data_dir);
         if !path.exists() {
             return Ok(None);
@@ -402,12 +402,11 @@ impl Config {
         list!("disabledWidgets", self.disabled_widgets);
         list!("enabledProviders", self.enabled_providers);
 
-        if let Some(arr) = v["providers"].as_array() {
-            if let Ok(parsed) =
+        if let Some(arr) = v["providers"].as_array()
+            && let Ok(parsed) =
                 serde_json::from_value::<Vec<Provider>>(serde_json::Value::Array(arr.clone()))
-            {
-                self.providers = parsed;
-            }
+        {
+            self.providers = parsed;
         }
         if let Some(order) = v["searchOrder"].as_object() {
             let pick = |k: &str, dest: &mut Vec<String>| {
@@ -449,28 +448,28 @@ impl Config {
         if std::env::var("OBSCURA_DISABLED").ok().as_deref() == Some("1") {
             self.read_pages = false;
         }
-        if let Ok(v) = std::env::var("OBSCURA_BIN") {
-            if !v.trim().is_empty() {
-                self.obscura_bin = v;
-            }
+        if let Ok(v) = std::env::var("OBSCURA_BIN")
+            && !v.trim().is_empty()
+        {
+            self.obscura_bin = v;
         }
         if let Ok(v) = std::env::var("OBSCURA_STEALTH") {
             self.obscura_stealth = !matches!(v.as_str(), "0" | "false" | "off");
         }
-        if let Ok(v) = std::env::var("FETCH_PAGE_LIMIT") {
-            if let Ok(n) = v.parse() {
-                self.fetch_page_limit = n;
-            }
+        if let Ok(v) = std::env::var("FETCH_PAGE_LIMIT")
+            && let Ok(n) = v.parse()
+        {
+            self.fetch_page_limit = n;
         }
-        if let Ok(v) = std::env::var("FETCH_TIMEOUT_SECS") {
-            if let Ok(n) = v.parse() {
-                self.fetch_timeout_secs = n;
-            }
+        if let Ok(v) = std::env::var("FETCH_TIMEOUT_SECS")
+            && let Ok(n) = v.parse()
+        {
+            self.fetch_timeout_secs = n;
         }
-        if let Ok(v) = std::env::var("WEB_SEARCH_NUM_RESULTS") {
-            if let Ok(n) = v.parse() {
-                self.num_web_results = n;
-            }
+        if let Ok(v) = std::env::var("WEB_SEARCH_NUM_RESULTS")
+            && let Ok(n) = v.parse()
+        {
+            self.num_web_results = n;
         }
         if let Ok(v) = std::env::var("WEB_SEARCH_ORDER") {
             self.search_order_web = split_list(&v);

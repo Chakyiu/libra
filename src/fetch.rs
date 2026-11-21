@@ -229,11 +229,11 @@ async fn read_one(cfg: &Config, url: &str, cancel: &AtomicBool) -> Option<PageBo
     if cancel.load(Ordering::Relaxed) {
         return http_page.filter(|page| usable(&page.text));
     }
-    if let Some(page) = read_obscura(cfg, &url).await {
-        if usable(&page.text) {
-            tracing::info!(url = %url, via = "obscura", chars = page.text.chars().count(), "read page");
-            return Some(page);
-        }
+    if let Some(page) = read_obscura(cfg, &url).await
+        && usable(&page.text)
+    {
+        tracing::info!(url = %url, via = "obscura", chars = page.text.chars().count(), "read page");
+        return Some(page);
     }
     let page = http_page?;
     if !usable(&page.text) {
@@ -601,7 +601,7 @@ fn ip_is_public(ip: IpAddr) -> bool {
 
 fn v4_is_public(v4: Ipv4Addr) -> bool {
     let o = v4.octets();
-    if v4.is_private()
+    !(v4.is_private()
         || v4.is_loopback()
         || v4.is_link_local()
         || v4.is_broadcast()
@@ -613,11 +613,7 @@ fn v4_is_public(v4: Ipv4Addr) -> bool {
         || (o[0] == 192 && o[1] == 0 && o[2] == 2)
         || (o[0] == 198 && o[1] == 51 && o[2] == 100)
         || (o[0] == 203 && o[1] == 0 && o[2] == 113)
-        || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
-    {
-        return false;
-    }
-    true
+        || (o[0] == 198 && (o[1] == 18 || o[1] == 19)))
 }
 
 fn v6_is_public(v6: Ipv6Addr) -> bool {

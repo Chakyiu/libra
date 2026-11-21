@@ -489,6 +489,13 @@ pub(crate) fn error_detail(err: &dyn std::error::Error) -> String {
     out
 }
 
+pub(crate) async fn read_error_body(resp: reqwest::Response) -> String {
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    let body: String = body.chars().take(600).collect();
+    format!("upstream {status}: {body}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::output_truncated_msg;
@@ -500,11 +507,4 @@ mod tests {
         ));
         assert!(!output_truncated_msg("no JSON found in model output"));
     }
-}
-
-pub(crate) async fn read_error_body(resp: reqwest::Response) -> String {
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    let body: String = body.chars().take(600).collect();
-    format!("upstream {status}: {body}")
 }

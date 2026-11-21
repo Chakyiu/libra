@@ -157,6 +157,7 @@ impl Mind<'_> {
 /// to become the answer. A real loop is cut here, by a repeated line. Watched on the
 /// reasoning trace only: an answer legitimately repeats short lines (table rules), thinking
 /// does not repeat long ones.
+#[derive(Default)]
 pub struct LoopGuard {
     /// the last `WINDOW` non-trivial thought lines, oldest first
     lines: std::collections::VecDeque<String>,
@@ -187,16 +188,6 @@ const ANSWER_TOKENS: u32 = 65_536;
 const LOOPING: &str = "the model got stuck repeating itself while reasoning and never wrote an answer. Try a model that thinks less, a lower Temperature, or fewer Sources per answer.";
 const BUDGET_USED: &str = "the model spent its whole token budget on reasoning and wrote no answer. Try a model that thinks less, or a lower Temperature.";
 const NO_TEXT: &str = "the model returned no answer text.";
-
-impl Default for LoopGuard {
-    fn default() -> Self {
-        Self {
-            lines: Default::default(),
-            pending: String::new(),
-            chars: 0,
-        }
-    }
-}
 
 impl LoopGuard {
     /// The line whose repetition ended the trace, when the trace has looped.
@@ -804,13 +795,12 @@ impl Pipeline {
         if practical_follow_up(&req.query) {
             from_history = false;
             cls.need_web_search = true;
-            if search_query.trim().is_empty()
+            if (search_query.trim().is_empty()
                 || same_ask(&search_query, &req.query)
-                || practical_follow_up(&search_query)
+                || practical_follow_up(&search_query))
+                && let Some(prev) = previous_user_question(&req.message_history)
             {
-                if let Some(prev) = previous_user_question(&req.message_history) {
-                    search_query = prev;
-                }
+                search_query = prev;
             }
         }
         // "https://… 總結" asks for that page, including on a later turn. The
@@ -857,14 +847,13 @@ impl Pipeline {
             choice.needs_location,
             &req.disabled_widgets,
         );
-        if here.is_none() {
-            if let Some(precise) = precise {
-                here = match cut(&turn.cancel, &tx, self.locate(&turn.chat_id, &tx, precise)).await
-                {
-                    Ok(place) => place,
-                    Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
-                };
-            }
+        if here.is_none()
+            && let Some(precise) = precise
+        {
+            here = match cut(&turn.cancel, &tx, self.locate(&turn.chat_id, &tx, precise)).await {
+                Ok(place) => place,
+                Err(_) => return self.give_up(&turn, &answer, &blocks, &tx).await,
+            };
         }
         if self.halt(&turn, &answer, &blocks, &tx).await {
             return;
@@ -1541,6 +1530,7 @@ impl Pipeline {
     ///
     /// `allow_notes` permits one retry when the trace held the answer and the reply was empty.
     /// The retry passes `false`, so it cannot retry again.
+    #[allow(clippy::too_many_arguments)]
     async fn stream_into(
         &self,
         llm: &Llm,
@@ -1687,12 +1677,15 @@ impl Pipeline {
                 )
                 .await;
         }
-        if body && allow_notes && dodges_question(answer) && question_is_specific(&task) {
-            if let Some(better) = self.straight_answer(llm, &task, temperature).await {
-                answer.clear();
-                answer.push_str(&better);
-                Self::emit(tx, Event::AnswerSet(better));
-            }
+        if body
+            && allow_notes
+            && dodges_question(answer)
+            && question_is_specific(&task)
+            && let Some(better) = self.straight_answer(llm, &task, temperature).await
+        {
+            answer.clear();
+            answer.push_str(&better);
+            Self::emit(tx, Event::AnswerSet(better));
         }
         Ok(())
     }
@@ -1700,6 +1693,7 @@ impl Pipeline {
     /// The notes already contain the answer and the reply channel was empty. One more
     /// call, with reasoning off, writes that reply. It runs once, including after a
     /// repeated line, because that line is often in the middle of a real draft.
+    #[allow(clippy::too_many_arguments)]
     async fn reply_from_notes(
         &self,
         llm: &Llm,
@@ -1854,6 +1848,7 @@ impl Pipeline {
 
     /// Think, then search. Fast is one round; balance is two; deep is three.
     /// Each later round sees what the earlier searches returned and either stops or fills a gap.
+    #[allow(clippy::too_many_arguments)]
     async fn research(
         &self,
         llm: &Llm,
@@ -2135,10 +2130,10 @@ impl Pipeline {
         };
         let mut out = Vec::new();
         for idx in v["selected"].as_array().cloned().unwrap_or_default() {
-            if let Some(i) = idx.as_u64().and_then(|i| usize::try_from(i).ok()) {
-                if let Some(r) = results.get(i) {
-                    out.push(r.clone());
-                }
+            if let Some(i) = idx.as_u64().and_then(|i| usize::try_from(i).ok())
+                && let Some(r) = results.get(i)
+            {
+                out.push(r.clone());
             }
         }
         if out.is_empty() {
@@ -2397,6 +2392,7 @@ fn page_budget(depth: Depth, configured: usize) -> usize {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn plan_queries(
     llm: &Llm,
     question: &str,
@@ -2763,13 +2759,10 @@ fn transform_only(query: &str) -> bool {
         .iter()
         .copied()
         .chain(SOFT.iter().copied())
-        .chain(
-            [
-                "中文", "英文", "一下", "這個", "这个", "這段", "这段", "上面", "上文", "它", "請",
-                "请", "幫我", "帮我", "把", "這", "这",
-            ]
-            .into_iter(),
-        )
+        .chain([
+            "中文", "英文", "一下", "這個", "这个", "這段", "这段", "上面", "上文", "它", "請",
+            "请", "幫我", "帮我", "把", "這", "这",
+        ])
         .collect();
     phrases.sort_by_key(|s| std::cmp::Reverse(s.len()));
     phrases.dedup();
@@ -3154,7 +3147,7 @@ mod tests {
             hit("https://b.example"),
             hit("https://c.example"),
         ];
-        let kept = pick_indices(&results, &vec![json!(3), json!(1), json!(9), json!(1)]);
+        let kept = pick_indices(&results, &[json!(3), json!(1), json!(9), json!(1)]);
         let urls: Vec<_> = kept.into_iter().map(|r| r.url).collect();
         assert_eq!(
             urls,
@@ -3404,7 +3397,7 @@ mod tests {
                 text: &mut text,
             };
             mind.push("First I worked out the VRAM.\n");
-            mind.push(&stuck_trace(1));
+            mind.push(stuck_trace(1));
             mind.cut_loop("Need maybe mention 30B about 24GB at Q4 [2]. Good.");
         }
         assert_eq!(text, "First I worked out the VRAM.\n");

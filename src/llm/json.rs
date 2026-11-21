@@ -34,7 +34,7 @@ pub fn extract_json(raw: &str) -> anyhow::Result<serde_json::Value> {
     }
     anyhow::bail!(
         "no JSON found in model output: {}",
-        &s.chars().take(240).collect::<String>()
+        s.chars().take(240).collect::<String>()
     )
 }
 
@@ -93,12 +93,12 @@ fn strip_trailing_commas(s: &str) -> String {
         if c == '"' {
             in_str = !in_str;
         }
-        if c == ',' && !in_str {
-            if let Some(next) = chars.get(i + 1) {
-                if *next == '}' || *next == ']' {
-                    continue;
-                }
-            }
+        if c == ','
+            && !in_str
+            && let Some(next) = chars.get(i + 1)
+            && (*next == '}' || *next == ']')
+        {
+            continue;
         }
         out.push(c);
     }

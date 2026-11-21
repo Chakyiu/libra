@@ -147,6 +147,7 @@ pub fn spawn_stream(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn call(
     http: &Client,
     base: &str,

@@ -193,7 +193,7 @@ impl Registry {
     }
 
     fn calculator(input: &str, query: &str) -> Option<Block> {
-        let expr = if input.is_empty() { query } else { &input };
+        let expr = if input.is_empty() { query } else { input };
         let value = eval(expr).ok()?;
         Some(Block {
             block_type: BlockType::Widget,
