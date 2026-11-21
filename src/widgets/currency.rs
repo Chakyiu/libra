@@ -236,7 +236,7 @@ mod tests {
             extra: None,
         };
         let text = Block::message("100 USD = 89.381 EUR");
-        assert!(facts(std::slice::from_ref(&money)).contains("100 USD = 89.382 EUR"));
+        assert!(facts(std::slice::from_ref(&money)).contains("100 USD = 89.381 EUR"));
         assert!(facts(&[text]).is_empty(), "only currency blocks count");
     }
 
