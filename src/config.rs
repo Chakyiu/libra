@@ -105,8 +105,8 @@ pub struct Config {
     /// Bot API server or a relay when the instance cannot reach api.telegram.org.
     pub telegram_api_url: String,
 
-    /// Bearer token every `/api` request must carry. Empty means the API is open — only
-    /// sensible on a trusted network or behind a proxy that authenticates. Env-only:
+    /// Bearer token every `/api` request must carry. Empty means the API is open; startup
+    /// permits it only on a loopback bind. Env-only:
     /// it is never read from settings.json and never returned by GET /api/settings.
     pub auth_token: String,
     /// Origins allowed to call the API from a browser. Empty = same-origin only,
@@ -132,6 +132,20 @@ impl SettingsHandle {
 }
 
 impl Config {
+    pub fn validate_bind(host: &str, auth_token: &str) -> anyhow::Result<()> {
+        let host_ip = host
+            .strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+            .unwrap_or(host);
+        let is_loopback = host_ip
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+        if auth_token.is_empty() && !is_loopback {
+            anyhow::bail!("LIBRA_AUTH_TOKEN must be set when HOST is not a loopback IP address");
+        }
+        Ok(())
+    }
+
     pub fn load() -> anyhow::Result<Self> {
         let data_dir = std::env::var("LIBRA_DATA_DIR")
             .or_else(|_| std::env::var("DATA_DIR"))
@@ -652,17 +666,33 @@ mod tests {
     }
 
     #[test]
-    fn the_access_token_stays_out_of_the_settings_api() {
+    fn empty_token_requires_a_real_loopback_bind() {
+        for host in ["0.0.0.0", "[::]", "::"] {
+            assert!(Config::validate_bind(host, "").is_err(), "{host}");
+        }
+        for host in ["127.0.0.1", "::1"] {
+            assert!(Config::validate_bind(host, "").is_ok(), "{host}");
+        }
+        assert!(Config::validate_bind("0.0.0.0", "token").is_ok());
+    }
+
+    #[test]
+    fn the_access_token_stays_out_of_settings_but_provider_keys_remain_available() {
         let mut cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
         cfg.auth_token = "s3cret".into();
         cfg.apply_settings(&serde_json::json!({
             "authToken": "x",
             "auth_token": "y",
-            "allowedOrigins": ["*"]
+            "allowedOrigins": ["*"],
+            "providers": [{
+                "id": "openai", "name": "OpenAI", "type": "open_ai",
+                "base_url": "https://api.openai.com/v1", "api_key": "provider-secret"
+            }]
         }));
         let json = cfg.settings_json();
         assert_eq!(cfg.auth_token, "s3cret");
         assert!(json.get("authToken").is_none(), "{json}");
         assert!(json.get("auth_token").is_none(), "{json}");
+        assert_eq!(json["providers"][0]["api_key"], "provider-secret");
     }
 }
