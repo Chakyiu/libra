@@ -117,7 +117,7 @@ export LIBRA_AUTH_TOKEN="$(openssl rand -hex 24)"
 docker compose pull && docker compose up --no-build
 ```
 
-At startup, the container prepares `/data` for uid 10001 and then runs Libra unprivileged. This repairs fresh and existing named volumes and writable bind mounts without a separate host-side chown step. On bind mounts, this changes the host directory and its contents to uid/gid 10001. Bind mounts must be writable and allow the container to change ownership and owner permissions; the entrypoint exits with a `/data`-specific error if the mount denies those operations. For restricted or read-only mounts, make the host directory writable and owned by uid/gid 10001, or use a writable mount that permits chown.
+At startup, if the entrypoint already runs as uid 10001, it skips ownership changes and starts Libra when `/data` is writable. Otherwise it repairs `/data` for uid 10001 as root, then drops privileges before starting Libra. This handles fresh and existing named volumes and writable bind mounts without a separate host-side chown step. On bind mounts, the root initialization path changes the host directory and its contents to uid/gid 10001. A root-owned bind mount must allow chown/chmod; when running as uid 10001, a restricted mount must already be writable by that uid. The entrypoint exits with a `/data`-specific error if it cannot proceed. For read-only or ownership-restricted mounts, make the host directory writable and owned by uid/gid 10001, or use a writable mount that permits the root initialization.
 
 `LIBRA_IMAGE=chakyiu/libra:<tag> docker compose pull && LIBRA_IMAGE=chakyiu/libra:<tag> docker compose up --no-build`
 pins a version other than the one in `docker-compose.yml`.
