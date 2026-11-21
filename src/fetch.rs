@@ -312,6 +312,7 @@ async fn read_http(cfg: &Config, url: &str, pinned: SocketAddr) -> Option<PageBo
         let client = http_client_for(&current_url, pinned)?;
         let response = client
             .get(&current_url)
+            .header(reqwest::header::USER_AGENT, BROWSER_UA)
             .timeout(timeout)
             .header("accept", "text/html,application/xhtml+xml,text/plain;q=0.9")
             .send()
@@ -384,10 +385,9 @@ async fn read_body(mut response: reqwest::Response, cap: usize) -> Option<Vec<u8
     Some(buf)
 }
 
-fn http_client_for(url: &str, pinned: SocketAddr) -> Option<reqwest::Client> {
+pub(crate) fn http_client_for(url: &str, pinned: SocketAddr) -> Option<reqwest::Client> {
     let host = Url::parse(url).ok()?.host_str()?.to_string();
     reqwest::Client::builder()
-        .user_agent(BROWSER_UA)
         .resolve(&host, pinned)
         .redirect(Policy::none())
         .connect_timeout(Duration::from_secs(10))
@@ -640,7 +640,7 @@ fn v6_is_public(v6: Ipv6Addr) -> bool {
     true
 }
 
-async fn resolve_public_address(url: &str) -> Option<SocketAddr> {
+pub(crate) async fn resolve_public_address(url: &str) -> Option<SocketAddr> {
     let url = url.to_string();
     tokio::task::spawn_blocking(move || resolve_public_address_blocking(&url))
         .await
@@ -654,14 +654,6 @@ fn checked_public_addresses(addrs: impl IntoIterator<Item = SocketAddr>) -> Opti
         .iter()
         .all(|addr| ip_is_public(addr.ip()))
         .then_some(first)
-}
-
-pub(crate) async fn url_resolves_public(url: &str) -> bool {
-    resolve_public_address(url).await.is_some()
-}
-
-pub(crate) fn url_resolves_public_blocking(url: &str) -> bool {
-    resolve_public_address_blocking(url).is_some()
 }
 
 fn resolve_public_address_blocking(url: &str) -> Option<SocketAddr> {

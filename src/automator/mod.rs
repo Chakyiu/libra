@@ -13,11 +13,12 @@ use crate::state::{App, Event};
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use chrono_tz::Tz;
 use cron::Schedule;
-use reqwest::redirect::Policy;
+use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use std::str::FromStr;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
+use url::Url;
 
 /// How often the due list is checked. Cron's finest unit is a minute, so this is slack.
 const TICK: Duration = Duration::from_secs(20);
@@ -352,15 +353,11 @@ async fn notify(app: &Arc<App>, job: &Job, run: &JobRun) {
             "chatId": run.chat_id,
         });
         match crate::fetch::public_http_url(url) {
-            Some(url) if crate::fetch::url_resolves_public(&url).await => {
-                if let Err(e) = webhook_client().post(url).json(&payload).send().await {
+            Some(url) => {
+                if let Err(e) = send_webhook(&url, &payload).await {
                     tracing::warn!("notification for '{}' failed: {e}", job.name);
                 }
             }
-            Some(_) => tracing::warn!(
-                "notification for '{}' skipped; notify_url host is not public",
-                job.name
-            ),
             None => tracing::warn!(
                 "notification for '{}' skipped; notify_url is not public HTTP",
                 job.name
@@ -375,28 +372,50 @@ async fn notify(app: &Arc<App>, job: &Job, run: &JobRun) {
     }
 }
 
-fn webhook_redirect_allowed(raw: &str) -> bool {
-    crate::fetch::public_http_url(raw)
-        .is_some_and(|url| crate::fetch::url_resolves_public_blocking(&url))
+async fn send_webhook(raw_url: &str, payload: &Value) -> Result<(), String> {
+    let mut current = Url::parse(raw_url).map_err(|e| e.to_string())?;
+    let mut method = Method::POST;
+    for redirect in 0..=5 {
+        let current_url = current.as_str();
+        let pinned = crate::fetch::resolve_public_address(current_url)
+            .await
+            .ok_or_else(|| "notify_url host is not public".to_string())?;
+        let client = crate::fetch::http_client_for(current_url, pinned)
+            .ok_or_else(|| "could not build pinned notification client".to_string())?;
+        let mut request = client
+            .request(method.clone(), current.clone())
+            .header(reqwest::header::USER_AGENT, "Libra");
+        if method == Method::POST {
+            request = request.json(payload);
+        }
+        let response = request.send().await.map_err(|e| e.to_string())?;
+        let status = response.status();
+        if !status.is_redirection() {
+            return Ok(());
+        }
+        if redirect == 5 {
+            return Err("too many notification redirects".into());
+        }
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| "notification redirect has no valid location".to_string())?;
+        current = webhook_redirect_url(&current, location)
+            .ok_or_else(|| "notification redirect is not public HTTP".to_string())?;
+        if status == StatusCode::SEE_OTHER
+            || (method == Method::POST
+                && (status == StatusCode::MOVED_PERMANENTLY || status == StatusCode::FOUND))
+        {
+            method = Method::GET;
+        }
+    }
+    Ok(())
 }
 
-fn webhook_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .redirect(Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 {
-                    return attempt.stop();
-                }
-                if webhook_redirect_allowed(attempt.url().as_str()) {
-                    attempt.follow()
-                } else {
-                    attempt.stop()
-                }
-            }))
-            .build()
-            .expect("webhook client")
-    })
+fn webhook_redirect_url(current: &Url, location: &str) -> Option<Url> {
+    let next = current.join(location).ok()?;
+    Url::parse(&crate::fetch::public_http_url(next.as_str())?).ok()
 }
 
 /// What the AI helper made of a sentence: a job ready to store, plus what it decided.
@@ -685,12 +704,20 @@ mod tests {
 
     #[test]
     fn webhook_redirects_to_private_addresses_are_stopped() {
-        for url in [
+        let current = Url::parse("https://public.example/hook").unwrap();
+        for location in [
             "http://127.0.0.1:9999/",
             "http://169.254.169.254/latest/meta-data/",
         ] {
-            assert!(!webhook_redirect_allowed(url), "{url}");
+            assert!(
+                webhook_redirect_url(&current, location).is_none(),
+                "{location}"
+            );
         }
+        assert_eq!(
+            webhook_redirect_url(&current, "next").unwrap().as_str(),
+            "https://public.example/next"
+        );
     }
 
     #[test]
