@@ -14,12 +14,26 @@ the same thing, and both the script and CI refuse to publish when they disagree.
 
 ## The fast path (bash: Linux, macOS, WSL, Git Bash)
 
+The image has to be pushed once per release and there are two ways to do it — pick one, not both.
+
+**With `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets** (CI pushes):
+
 ```bash
 git switch main && git pull
-./scripts/release.sh 0.1.0          # or v0.1.0, then pushes the image
-./scripts/release.sh 0.1.0 --no-push   # same checks, stop before the push
-git push origin main v0.1.0          # also starts .github/workflows/release.yml
+./scripts/release.sh 0.1.0 --no-push   # every check + the build, no push
+git push origin main v0.1.0            # the tag push pushes the image and opens the Release
 ```
+
+**With `docker login` on this host and no repo secrets** (the script pushes):
+
+```bash
+git switch main && git pull
+./scripts/release.sh 0.1.0             # every check, then push <version> and :latest
+git push origin main v0.1.0            # the tag push only creates the Release
+```
+
+Doing both in the secrets case builds and pushes the image twice; the tag push would just replace
+what the script pushed with the same thing.
 
 The script refuses to run unless all of this holds:
 
@@ -30,8 +44,9 @@ The script refuses to run unless all of this holds:
 5. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`,
    `npm test` and `npm run build` (in `web/`) are all green.
 
-Then it creates the tag if needed, builds `<registry>/<namespace>/libra:<version>` plus `:latest`,
-and pushes both. `REGISTRY` / `NAMESPACE` override the Docker Hub defaults.
+Then it creates the tag if needed, builds `<registry>/<namespace>/libra:<version>` plus `:latest`
+for `linux/amd64` — the only platform the release workflow publishes — and pushes both.
+`REGISTRY` / `NAMESPACE` override the Docker Hub defaults, `PLATFORM` overrides the platform.
 
 Docker Hub credentials are not handled here: `docker login` first, or let CI push (below).
 
@@ -66,29 +81,37 @@ npm run build
 if ($LASTEXITCODE) { Pop-Location; throw 'web build' }
 Pop-Location
 
-# tag the commit, then the image
+# tag the commit, then the image (linux/amd64, like the workflow)
 git tag -a "v$cargo" -m "libra $cargo"
-docker build -t "docker.io/chakyiu/libra:$cargo" -t "docker.io/chakyiu/libra:latest" .
+docker build --platform linux/amd64 -t "docker.io/chakyiu/libra:$cargo" -t "docker.io/chakyiu/libra:latest" .
 docker push "docker.io/chakyiu/libra:$cargo"
 docker push "docker.io/chakyiu/libra:latest"
 git push origin main "v$cargo"
 ```
 
-`docker push` needs `docker login` first. The image tag push is what starts the release workflow.
+`docker push` needs `docker login` first. Skip the two `docker push` lines when the repo has the
+secrets below — the tag push publishes the image, and pushing here as well would just build it twice.
 
 ## Publishing from CI
 
 `.github/workflows/release.yml` runs on a `v*` tag push, or on `workflow_dispatch` with an existing
-tag (it defaults to `v<Cargo.toml version>`). It repeats the version guard, builds `linux/amd64`,
-pushes `:<version>` and `:latest`, and creates the GitHub Release if one does not exist yet.
+tag (it defaults to `v<Cargo.toml version>`). It repeats the version guard — reading `Cargo.toml` and
+`web/package.json` out of the **tag's** tree, so a dispatch on a branch whose version moved on is
+rejected too — and then does two independent things:
 
-It needs two repository secrets — add them in Settings → Secrets → Actions:
+1. creates the GitHub Release for the tag, which needs no credentials; then
+2. if `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set, builds `linux/amd64` and pushes
+   `:<version>` and `:latest`.
+
+So the first tag push is green and gets a Release even before registry credentials exist. Add them
+in Settings → Secrets → Actions when you want CI to publish the image:
 
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN` — a Docker Hub access token with read/write on the repository, not the account
   password
 
-Missing secrets fail the login step; nothing is pushed halfway.
+With them unset the run logs a notice and skips the push; with them wrong the login step fails and
+the Release already exists.
 
 ## Checking a release
 

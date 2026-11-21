@@ -11,6 +11,9 @@
 # Docker Hub credentials are not this script's business: log in first (`docker login`),
 # or let .github/workflows/release.yml push from CI with repo secrets.
 #
+# The image is built for linux/amd64 only, the platform the release workflow publishes;
+# PLATFORM overrides it (for a local multi-arch experiment, say).
+#
 # Windows: there is no PowerShell port. Run this under WSL or Git Bash — both give you
 # `bash`, and the script only calls git, cargo, npm and docker.
 set -euo pipefail
@@ -89,8 +92,11 @@ if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
 fi
 
 REF="${REGISTRY}/${NAMESPACE}/${IMAGE}"
-step "docker build ${REF}:${VERSION}"
-docker build -t "${REF}:${VERSION}" -t "${REF}:latest" .
+# Same platform the release workflow publishes. Without it an arm64 host would push
+# arm64 under the linux/amd64 tag, and the next tag push would quietly replace it.
+PLATFORM="${PLATFORM:-linux/amd64}"
+step "docker build --platform ${PLATFORM} ${REF}:${VERSION}"
+docker build --platform "${PLATFORM}" -t "${REF}:${VERSION}" -t "${REF}:latest" .
 
 if [ "$PUSH" -eq 1 ]; then
   step "docker push"
@@ -100,9 +106,13 @@ fi
 
 cat <<EOF
 
-release: ${REF}:${VERSION} ($PUSH: $([ "$PUSH" -eq 1 ] && echo pushed || echo not pushed))
+release: ${REF}:${VERSION} --platform ${PLATFORM} ($PUSH: $([ "$PUSH" -eq 1 ] && echo pushed || echo not pushed))
 next:
   git push origin main "$TAG"    # also starts .github/workflows/release.yml
+  That workflow pushes the image when DOCKERHUB_* repo secrets are set, and only
+  creates the GitHub Release when they are not — so this script's push is for a host
+  with \`docker login\` and no secrets. With secrets, run --no-push and let CI push:
+    ./scripts/release.sh ${VERSION} --no-push && git push origin main "$TAG"
   Then check the image, on a clean Docker host:
     LIBRA_AUTH_TOKEN=\$(openssl rand -hex 24) docker run --rm -p 3001:3001 ${REF}:${VERSION}
     curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:3001/health
