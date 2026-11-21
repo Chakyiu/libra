@@ -7,7 +7,7 @@
 
 use crate::db::{Job, JobRun};
 use crate::error::{LibraError, LibraResult};
-use crate::pipeline::AskRequest;
+use crate::pipeline::{AskRequest, acquire_model_slot, try_acquire_model_slot};
 use crate::prompts;
 use crate::state::{App, Event};
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
@@ -206,14 +206,7 @@ async fn run_command(app: &Arc<App>, job: &Job) -> anyhow::Result<Outcome> {
     })
 }
 
-/// Questions are asked one at a time. Ollama serves a single request by default and the free
-/// hosted models rate-limit parallel ones, so two jobs due in the same minute used to spend the
-/// second job's whole budget queued *inside* the model and report a timeout for an answer that was
-/// simply waiting its turn. The permit travels with the ask rather than with the task watching it,
-/// so a run whose report time expires keeps its place until the thread is really finished.
-static MODEL_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
-
-/// How long a question will sit in that queue before the run gives up and says so.
+/// How long a question will sit in the shared model queue before the run gives up.
 const QUEUE_LIMIT: Duration = Duration::from_secs(900);
 
 const QUEUE_NOTE: &str = "waiting for the model — Libra asks one question at a time";
@@ -226,12 +219,12 @@ async fn run_prompt(app: &Arc<App>, job: &Job, run_id: i64) -> anyhow::Result<Ou
     // link it while the job runs instead of only after it closes.
     let _ = app.db.note_job_run(run_id, &chat_id, "").await;
     // The wait happens before the budget clock starts: queued time is not the answer's fault.
-    let slot = match MODEL_SLOT.try_acquire() {
+    let slot = match try_acquire_model_slot() {
         Ok(ready) => ready,
         Err(_) => {
             tracing::info!("job '{}' is queued behind another question", job.name);
             let _ = app.db.note_job_run(run_id, &chat_id, QUEUE_NOTE).await;
-            match tokio::time::timeout(QUEUE_LIMIT, MODEL_SLOT.acquire()).await {
+            match tokio::time::timeout(QUEUE_LIMIT, acquire_model_slot()).await {
                 Ok(Ok(turn)) => turn,
                 Ok(Err(_)) => anyhow::bail!("the model queue closed"),
                 Err(_) => anyhow::bail!(
@@ -259,9 +252,8 @@ async fn run_prompt(app: &Arc<App>, job: &Job, run_id: i64) -> anyhow::Result<Ou
     };
     // Not awaited: an answer that runs past the budget is still stored as a thread.
     tokio::spawn(async move {
-        // Released when the answer is finished, not when this job stops watching it.
-        let _slot = slot;
-        pipeline.ask(req, tx).await;
+        // The pipeline owns the permit until the answer is finished, even if this job times out.
+        pipeline.ask_with_model_slot(req, tx, slot).await;
     });
 
     // Both kinds of job are watched, not joined: a prompt answer that runs past its budget

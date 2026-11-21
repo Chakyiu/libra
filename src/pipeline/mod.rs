@@ -15,9 +15,22 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
+use tokio::sync::{Notify, Semaphore, SemaphorePermit, TryAcquireError};
+
+/// All answer pipelines share one model slot, including UI asks and scheduled jobs.
+static MODEL_SLOT: Semaphore = Semaphore::const_new(1);
+
+pub(crate) type ModelPermit = SemaphorePermit<'static>;
+
+pub(crate) fn try_acquire_model_slot() -> Result<ModelPermit, TryAcquireError> {
+    MODEL_SLOT.try_acquire()
+}
+
+pub(crate) async fn acquire_model_slot() -> Result<ModelPermit, tokio::sync::AcquireError> {
+    MODEL_SLOT.acquire().await
+}
 
 /// In-flight answers. Stop can land before the pipeline has registered, or just after it
 /// has finished; those two cases must not cancel the next question on the same thread.
@@ -333,7 +346,7 @@ impl Runs {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Register this ask. The flag is already set when a stop arrived before the pipeline did.
+    /// Register this ask, stopping any previous run for its chat. An armed stop already applies.
     fn begin(&self, chat_id: &str) -> Stop {
         let mut book = self.book();
         book.armed
@@ -344,6 +357,9 @@ impl Runs {
             .armed
             .remove(chat_id)
             .is_some_and(|t| t.elapsed() < Duration::from_secs(30));
+        if let Some(previous) = book.live.get(chat_id) {
+            previous.trip();
+        }
         let flag = Stop::new(stopped);
         book.live.insert(chat_id.to_string(), flag.clone());
         flag
@@ -366,10 +382,16 @@ impl Runs {
         book.armed.insert(chat_id.to_string(), Instant::now());
     }
 
-    pub fn end(&self, chat_id: &str) {
+    fn end(&self, chat_id: &str, stop: &Stop) {
         let mut book = self.book();
-        book.live.remove(chat_id);
-        book.ended.insert(chat_id.to_string(), Instant::now());
+        if book
+            .live
+            .get(chat_id)
+            .is_some_and(|current| Arc::ptr_eq(&current.inner, &stop.inner))
+        {
+            book.live.remove(chat_id);
+            book.ended.insert(chat_id.to_string(), Instant::now());
+        }
     }
 }
 
@@ -463,11 +485,12 @@ struct LiveTurn {
 struct RunGuard {
     runs: Runs,
     chat_id: String,
+    stop: Stop,
 }
 
 impl Drop for RunGuard {
     fn drop(&mut self) {
-        self.runs.end(&self.chat_id);
+        self.runs.end(&self.chat_id, &self.stop);
     }
 }
 
@@ -628,15 +651,48 @@ impl Pipeline {
 
     /// Run the whole answer pipeline. Every stage degrades instead of failing the request.
     pub async fn ask(self: &Arc<Self>, req: AskRequest, tx: UnboundedSender<Event>) {
+        let chat_id = req.id.clone();
+        let cancel = self.runs.begin(&chat_id);
+        let _guard = RunGuard {
+            runs: self.runs.clone(),
+            chat_id,
+            stop: cancel.clone(),
+        };
+        let _slot = tokio::select! {
+            biased;
+            _ = cancel.wait() => return,
+            slot = acquire_model_slot() => slot.expect("the shared model gate is never closed"),
+        };
+        self.ask_with_cancel(req, tx, cancel).await;
+    }
+
+    /// Scheduled jobs acquire the same slot before starting their answer budget.
+    pub(crate) async fn ask_with_model_slot(
+        self: &Arc<Self>,
+        req: AskRequest,
+        tx: UnboundedSender<Event>,
+        _slot: ModelPermit,
+    ) {
+        let chat_id = req.id.clone();
+        let cancel = self.runs.begin(&chat_id);
+        let _guard = RunGuard {
+            runs: self.runs.clone(),
+            chat_id,
+            stop: cancel.clone(),
+        };
+        self.ask_with_cancel(req, tx, cancel).await;
+    }
+
+    async fn ask_with_cancel(
+        self: &Arc<Self>,
+        req: AskRequest,
+        tx: UnboundedSender<Event>,
+        cancel: Stop,
+    ) {
         let cfg = self.cfg.get();
         let started = Instant::now();
         let chat_id = req.id.clone();
         let query = req.query.clone();
-        let cancel = self.runs.begin(&chat_id);
-        let _guard = RunGuard {
-            runs: self.runs.clone(),
-            chat_id: chat_id.clone(),
-        };
         // The client generates the chat id, so the row may not exist yet.
         if let Err(e) = self.db.create_chat(&chat_id, &cfg.now()).await {
             tracing::warn!("could not create chat row: {e}");
@@ -1694,7 +1750,12 @@ impl Pipeline {
     }
 
     /// The trace planned the reply, and the answer channel asked for the question again.
-    async fn straight_answer(&self, llm: &Llm, task: &str, temperature: Option<f32>) -> Option<String> {
+    async fn straight_answer(
+        &self,
+        llm: &Llm,
+        task: &str,
+        temperature: Option<f32>,
+    ) -> Option<String> {
         let asked = task_head(task, 8_000);
         let text = llm
             .complete(ChatRequest {
@@ -2621,10 +2682,14 @@ fn same_ask(a: &str, b: &str) -> bool {
 }
 
 fn previous_user_question(history: &[Msg]) -> Option<String> {
-    history.iter().rev().find(|m| m.role == "user").and_then(|m| {
-        let q = m.content.trim();
-        (!q.is_empty()).then(|| q.to_string())
-    })
+    history
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .and_then(|m| {
+            let q = m.content.trim();
+            (!q.is_empty()).then(|| q.to_string())
+        })
 }
 
 /// A short request whose only job is to transform the previous answer.
@@ -2916,7 +2981,9 @@ mod tests {
         assert!(!transform_only("中文新聞"));
         let dodge = "I don't have a specific question or context from you yet. Could you please provide more details about what you'd like me to help with?";
         assert!(dodges_question(dodge));
-        assert!(!dodges_question("Run `sar -u 1 5` to sample CPU use over five seconds."));
+        assert!(!dodges_question(
+            "Run `sar -u 1 5` to sample CPU use over five seconds."
+        ));
         assert!(question_is_specific(
             "User question: write me script to check overall health\n"
         ));
@@ -3155,10 +3222,42 @@ mod tests {
         runs.cancel("c");
         let flag = runs.begin("c");
         assert!(flag.load(Ordering::Relaxed));
-        runs.end("c");
+        runs.end("c", &flag);
         runs.cancel("c");
         let next = runs.begin("c");
         assert!(!next.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn beginning_a_new_ask_stops_only_the_previous_run() {
+        let runs = Runs::default();
+        let previous = runs.begin("c");
+        let current = runs.begin("c");
+        assert!(previous.load(Ordering::Acquire));
+        assert!(!current.load(Ordering::Acquire));
+
+        runs.end("c", &previous);
+        runs.cancel("c");
+        assert!(current.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn model_requests_wait_for_the_shared_permit() {
+        let first = acquire_model_slot().await.unwrap();
+        let mut waiting = tokio::spawn(acquire_model_slot());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut waiting)
+                .await
+                .is_err()
+        );
+
+        drop(first);
+        let second = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("queued model request should acquire the released slot")
+            .unwrap()
+            .unwrap();
+        drop(second);
     }
 
     #[test]
