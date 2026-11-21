@@ -8,7 +8,9 @@ RUN npm run build
 
 # ---------- backend ----------
 # glibc, not musl: the Obscura release binary needs it, and it runs in this image.
-FROM rust:1.95-bookworm AS build
+# Keep this tag in step with `dtolnay/rust-toolchain@1.100.0` in
+# .github/workflows/ci.yml: CI tests the toolchain this image ships. Move both together.
+FROM rust:1.100-bookworm AS build
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
