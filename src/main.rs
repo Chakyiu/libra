@@ -39,7 +39,11 @@ async fn main() -> anyhow::Result<()> {
 
     let db = Arc::new(Db::connect(&cfg.db_path.to_string_lossy()).await?);
     let cache = crate::cache::Cache::new(&cfg.redis_url, cfg.redis_enabled).await;
-    tracing::info!(redis = cache.enabled(), url = %cfg.redis_url, "redis state");
+    tracing::info!(
+        redis = cache.enabled(),
+        host = %crate::cache::redacted_host(&cfg.redis_url),
+        "redis state"
+    );
 
     let settings = crate::config::SettingsHandle::new(cfg.clone());
     let app = Arc::new(App::new(settings, db, cache)?);

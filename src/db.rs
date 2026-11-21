@@ -31,11 +31,6 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
 
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
     CREATE TABLE IF NOT EXISTS documents (
       id TEXT PRIMARY KEY,
       chat_id TEXT NOT NULL DEFAULT '',

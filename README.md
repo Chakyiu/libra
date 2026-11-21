@@ -79,7 +79,7 @@ like one you asked for.
 |---|---|---|
 | backend | Next.js (Node) | Rust (axum), single static binary |
 | storage | SQLite (drizzle) | SQLite (sqlx, WAL) |
-| cache | none | Redis: search results, embeddings, discover, single-flight |
+| cache | none | Redis: search results, Discover articles, currency rates |
 | research loop | native tool-calling, 2–25 iterations | plan the queries, then 1, 2 or 3 search rounds (fast, balance, deep) |
 | providers | OpenAI/Anthropic/Gemini/Groq/Ollama/… | OpenAI-compatible (incl. OpenRouter, Ollama, LM Studio), Anthropic, Gemini |
 | search | SearxNG only | SearxNG, Brave, Tavily, Exa, DuckDuckGo, Bing HTML scrape, Firecrawl — per-kind ordered fallback |
@@ -112,6 +112,10 @@ That brings up Libra, Redis and a SearxNG metasearch container. A fresh instance
 providers: open **`http://localhost:3001/settings/?tab=providers`**, add one (Ollama, OpenAI,
 OpenRouter, Anthropic, Gemini or any OpenAI-compatible server) with the models it serves, and ask
 something. Nothing else needs configuring — search works through the bundled SearxNG.
+
+The database is one SQLite file at `$LIBRA_DATA_DIR/libra.db` — `/data/libra.db` in the image and
+in Compose, `~/.local/share/libra/libra.db` on Linux when `LIBRA_DATA_DIR` is unset. Nothing else
+moves it; settings live next to it in `$LIBRA_DATA_DIR/settings.json`.
 
 ### Without Docker
 
