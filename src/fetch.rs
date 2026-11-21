@@ -211,13 +211,10 @@ async fn read_one(cfg: &Config, url: &str, cancel: &AtomicBool) -> Option<PageBo
         return None;
     }
     let url = public_http_url(url)?;
-    if !host_resolves_public(&url).await {
-        tracing::info!(url = %url, "skipped page read; host is not a public address");
-        return None;
-    }
+    let pinned = resolve_public_address(&url).await?;
     // A server-rendered article is already in the HTML. Obscura is for a thin or
     // blocked response. Its rendered "allow ads" screen must not replace the article.
-    let http_page = read_http(cfg, &url).await;
+    let http_page = read_http(cfg, &url, pinned).await;
     if http_page
         .as_ref()
         .is_some_and(|page| is_document(&page.text))
@@ -306,46 +303,71 @@ async fn run_command(bin: &str, args: &[String], timeout: Duration) -> Option<(S
     ))
 }
 
-async fn read_http(cfg: &Config, url: &str) -> Option<PageBody> {
+async fn read_http(cfg: &Config, url: &str, pinned: SocketAddr) -> Option<PageBody> {
     let timeout = Duration::from_secs(cfg.fetch_timeout_secs.clamp(5, 60) as u64);
-    let response = http_client()
-        .get(url)
-        .timeout(timeout)
-        .header("accept", "text/html,application/xhtml+xml,text/plain;q=0.9")
-        .send()
-        .await
-        .ok()?;
-    if !response.status().is_success() {
-        return None;
+    let mut current = Url::parse(url).ok()?;
+    let mut pinned = pinned;
+    for redirect in 0..=5 {
+        let current_url = current.as_str().to_string();
+        let client = http_client_for(&current_url, pinned)?;
+        let response = client
+            .get(&current_url)
+            .timeout(timeout)
+            .header("accept", "text/html,application/xhtml+xml,text/plain;q=0.9")
+            .send()
+            .await
+            .ok()?;
+        if response.status().is_redirection() {
+            if redirect == 5 {
+                return None;
+            }
+            current = current
+                .join(
+                    response
+                        .headers()
+                        .get(reqwest::header::LOCATION)?
+                        .to_str()
+                        .ok()?,
+                )
+                .ok()?;
+            let cleaned = public_http_url(current.as_str())?;
+            current = Url::parse(&cleaned).ok()?;
+            pinned = resolve_public_address(current.as_str()).await?;
+            continue;
+        }
+        if !response.status().is_success() {
+            return None;
+        }
+        let kind = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !(kind.is_empty()
+            || kind.contains("html")
+            || kind.contains("text/plain")
+            || kind.contains("markdown"))
+        {
+            return None;
+        }
+        let bytes = read_body(response, HTTP_BYTES).await?;
+        let html = String::from_utf8_lossy(&bytes);
+        let (title, text) = if kind.contains("text/plain") || kind.contains("markdown") {
+            (title_from_text(&html, &current_url), tidy(&html))
+        } else {
+            html_to_text(&html, &current_url)
+        };
+        if !usable(&text) {
+            return None;
+        }
+        return Some(PageBody {
+            url: current_url,
+            title,
+            text,
+        });
     }
-    let kind = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if !(kind.is_empty()
-        || kind.contains("html")
-        || kind.contains("text/plain")
-        || kind.contains("markdown"))
-    {
-        return None;
-    }
-    let bytes = read_body(response, HTTP_BYTES).await?;
-    let html = String::from_utf8_lossy(&bytes);
-    let (title, text) = if kind.contains("text/plain") || kind.contains("markdown") {
-        (title_from_text(&html, url), tidy(&html))
-    } else {
-        html_to_text(&html, url)
-    };
-    if !usable(&text) {
-        return None;
-    }
-    Some(PageBody {
-        url: url.to_string(),
-        title,
-        text,
-    })
+    None
 }
 
 async fn read_body(mut response: reqwest::Response, cap: usize) -> Option<Vec<u8>> {
@@ -362,34 +384,15 @@ async fn read_body(mut response: reqwest::Response, cap: usize) -> Option<Vec<u8
     Some(buf)
 }
 
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .user_agent(BROWSER_UA)
-            .redirect(Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 {
-                    return attempt.stop();
-                }
-                let Some(url) = public_http_url(attempt.url().as_str()) else {
-                    return attempt.stop();
-                };
-                let Some(host) = Url::parse(&url)
-                    .ok()
-                    .and_then(|parsed| parsed.host_str().map(str::to_string))
-                else {
-                    return attempt.stop();
-                };
-                if host_resolves_public_blocking(&host) {
-                    attempt.follow()
-                } else {
-                    attempt.stop()
-                }
-            }))
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-            .expect("page reader client")
-    })
+fn http_client_for(url: &str, pinned: SocketAddr) -> Option<reqwest::Client> {
+    let host = Url::parse(url).ok()?.host_str()?.to_string();
+    reqwest::Client::builder()
+        .user_agent(BROWSER_UA)
+        .resolve(&host, pinned)
+        .redirect(Policy::none())
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .ok()
 }
 
 fn page_from_text(url: &str, text: &str) -> PageBody {
@@ -637,27 +640,40 @@ fn v6_is_public(v6: Ipv6Addr) -> bool {
     true
 }
 
-async fn host_resolves_public(url: &str) -> bool {
-    let Some(host) = Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_string()))
-    else {
-        return false;
-    };
-    tokio::task::spawn_blocking(move || host_resolves_public_blocking(&host))
+async fn resolve_public_address(url: &str) -> Option<SocketAddr> {
+    let url = url.to_string();
+    tokio::task::spawn_blocking(move || resolve_public_address_blocking(&url))
         .await
-        .unwrap_or(false)
+        .ok()?
 }
 
-fn host_resolves_public_blocking(host: &str) -> bool {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return ip_is_public(ip);
-    }
-    let Ok(addrs) = (host, 443).to_socket_addrs() else {
-        return false;
+fn checked_public_addresses(addrs: impl IntoIterator<Item = SocketAddr>) -> Option<SocketAddr> {
+    let addrs: Vec<_> = addrs.into_iter().collect();
+    let first = *addrs.first()?;
+    addrs
+        .iter()
+        .all(|addr| ip_is_public(addr.ip()))
+        .then_some(first)
+}
+
+pub(crate) async fn url_resolves_public(url: &str) -> bool {
+    resolve_public_address(url).await.is_some()
+}
+
+pub(crate) fn url_resolves_public_blocking(url: &str) -> bool {
+    resolve_public_address_blocking(url).is_some()
+}
+
+fn resolve_public_address_blocking(url: &str) -> Option<SocketAddr> {
+    let parsed = Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    let port = parsed.port_or_known_default()?;
+    let addrs = if let Ok(ip) = host.parse::<IpAddr>() {
+        vec![SocketAddr::new(ip, port)]
+    } else {
+        (host, port).to_socket_addrs().ok()?.collect()
     };
-    let ips: Vec<SocketAddr> = addrs.collect();
-    !ips.is_empty() && ips.iter().all(|addr| ip_is_public(addr.ip()))
+    checked_public_addresses(addrs)
 }
 
 fn page_key(url: &str) -> String {
@@ -793,6 +809,44 @@ mod tests {
         ] {
             assert!(public_http_url(raw).is_none(), "{raw}");
         }
+    }
+
+    #[test]
+    fn a_mixed_public_private_dns_answer_is_refused_before_request_building() {
+        let answers = [
+            "93.184.216.34:80".parse().unwrap(),
+            "169.254.169.254:80".parse().unwrap(),
+        ];
+        assert!(checked_public_addresses(answers).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_pinned_client_dials_the_checked_ip_with_the_original_host() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1024];
+            let n = stream.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..n]).to_ascii_lowercase();
+            assert!(request.contains(&format!("host: pin-test.invalid:{}", address.port())));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+        });
+
+        let url = format!("http://pin-test.invalid:{}/", address.port());
+        let response = http_client_for(&url, address)
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        server.await.unwrap();
     }
 
     #[test]

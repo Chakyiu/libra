@@ -13,9 +13,10 @@ use crate::state::{App, Event};
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use chrono_tz::Tz;
 use cron::Schedule;
+use reqwest::redirect::Policy;
 use serde_json::{Value, json};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 /// How often the due list is checked. Cron's finest unit is a minute, so this is slack.
@@ -350,8 +351,20 @@ async fn notify(app: &Arc<App>, job: &Job, run: &JobRun) {
             "finishedAt": run.finished_at,
             "chatId": run.chat_id,
         });
-        if let Err(e) = app.http.post(url).json(&payload).send().await {
-            tracing::warn!("notification for '{}' failed: {e}", job.name);
+        match crate::fetch::public_http_url(url) {
+            Some(url) if crate::fetch::url_resolves_public(&url).await => {
+                if let Err(e) = webhook_client().post(url).json(&payload).send().await {
+                    tracing::warn!("notification for '{}' failed: {e}", job.name);
+                }
+            }
+            Some(_) => tracing::warn!(
+                "notification for '{}' skipped; notify_url host is not public",
+                job.name
+            ),
+            None => tracing::warn!(
+                "notification for '{}' skipped; notify_url is not public HTTP",
+                job.name
+            ),
         }
     }
     if !crate::notify::announces(&cfg.notify_runs, &run.status) {
@@ -360,6 +373,30 @@ async fn notify(app: &Arc<App>, job: &Job, run: &JobRun) {
     if let Err(e) = crate::notify::announce_run(&app.http, &cfg, job, run, &body).await {
         tracing::warn!("telegram notification for '{}' failed: {e}", job.name);
     }
+}
+
+fn webhook_redirect_allowed(raw: &str) -> bool {
+    crate::fetch::public_http_url(raw)
+        .is_some_and(|url| crate::fetch::url_resolves_public_blocking(&url))
+}
+
+fn webhook_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    return attempt.stop();
+                }
+                if webhook_redirect_allowed(attempt.url().as_str()) {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+            .build()
+            .expect("webhook client")
+    })
 }
 
 /// What the AI helper made of a sentence: a job ready to store, plus what it decided.
@@ -645,6 +682,16 @@ mod tests {
 
     /// A stamp in the past, so every drafted job's next run is ahead of it.
     const NOW: &str = "2026-10-20T00:00:00Z";
+
+    #[test]
+    fn webhook_redirects_to_private_addresses_are_stopped() {
+        for url in [
+            "http://127.0.0.1:9999/",
+            "http://169.254.169.254/latest/meta-data/",
+        ] {
+            assert!(!webhook_redirect_allowed(url), "{url}");
+        }
+    }
 
     #[test]
     fn five_field_cron_is_normalized() {

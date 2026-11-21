@@ -591,6 +591,15 @@ async fn list_job_runs(
 
 /// Fill in what the form leaves out, and refuse a job that could never run — a typo in
 /// the schedule should be a 400, not a silent never-fires.
+fn checked_notify_url(raw: &str) -> LibraResult<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(String::new());
+    }
+    crate::fetch::public_http_url(raw)
+        .ok_or_else(|| LibraError::BadRequest("notify_url must be a public http(s) URL".into()))
+}
+
 fn checked_job(app: &Arc<App>, body: Job, existing: Option<&Job>) -> LibraResult<Job> {
     let cfg = app.settings.get();
     let id = if !body.id.trim().is_empty() {
@@ -640,7 +649,7 @@ fn checked_job(app: &Arc<App>, body: Job, existing: Option<&Job>) -> LibraResult
         // A schedule may not hold the machine hostage; microsandbox caps the VM anyway, and
         // a prompt job has a floor of its own because a search-backed answer takes minutes.
         max_duration_secs: crate::automator::clamp_duration(&body.kind, body.max_duration_secs),
-        notify_url: body.notify_url.trim().to_string(),
+        notify_url: checked_notify_url(&body.notify_url)?,
         // Editing a job must not reset its history or pretend it is new.
         created_at: existing
             .map(|j| j.created_at.clone())
@@ -668,5 +677,25 @@ mod tests {
         assert!(!token_matches(Some(&header("Bearer wrong")), "secret"));
         assert!(!token_matches(Some(&header("secret")), ""));
         assert!(!token_matches(None, "secret"));
+    }
+
+    #[test]
+    fn notify_urls_must_be_public_before_a_job_is_saved() {
+        for url in [
+            "http://127.0.0.1:9999/",
+            "http://192.168.1.20/",
+            "http://169.254.169.254/latest/meta-data/",
+        ] {
+            let err = checked_notify_url(url).unwrap_err().to_string();
+            assert!(
+                err.contains("notify_url") && err.contains("public"),
+                "{err}"
+            );
+        }
+        assert_eq!(checked_notify_url("").unwrap(), "");
+        assert_eq!(
+            checked_notify_url("https://example.com/hook").unwrap(),
+            "https://example.com/hook"
+        );
     }
 }
