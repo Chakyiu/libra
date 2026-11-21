@@ -6,6 +6,7 @@ import FileBlock from "@/components/FileBlock";
 import { linkCitations, parseCiteHref, trimPartial } from "@/lib/cite";
 import { fileFromLang, promoteFiles } from "@/lib/files";
 import { useLit } from "@/lib/lit";
+import { safeHref } from "@/lib/safeHref";
 
 type CiteHandlers = {
   turnKey: string;
@@ -57,8 +58,11 @@ function Anchor({ href, children, ...rest }: { href?: string; children?: React.R
       <Cite n={refs[0]} />
     );
   }
+  const url = safeHref(href);
+  // Model-written markdown can carry a `javascript:` href; keep the words, drop the link.
+  if (!url) return <span>{children}</span>;
   return (
-    <a {...rest} href={href} target="_blank" rel="noreferrer noopener">
+    <a {...rest} href={url} target="_blank" rel="noreferrer noopener">
       {children}
     </a>
   );
