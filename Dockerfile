@@ -100,7 +100,6 @@ ENV HOME=/home/libra
 ENV PORT=3001 \
     LIBRA_DATA_DIR=/data \
     LIBRA_STATIC_DIR=/app/web/out \
-    DATABASE_URL=/data/libra.db \
     OBSCURA_BIN=/usr/local/bin/obscura \
     MSB_BIN=/opt/microsandbox/bin/msb \
     RUST_LOG=info

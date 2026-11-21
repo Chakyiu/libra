@@ -4,12 +4,24 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
-/// Redis is the hot path: search results, embeddings, config mirror, answer
-/// cache and single-flight locks. It is *optional* — every call degrades to a
-/// miss when Redis is down so a laptop `cargo run` without Redis still works.
+/// Redis caches exactly three things: web search results, Discover articles and
+/// currency-rate tables. Embeddings are recomputed for every question and there
+/// is no single-flight lock. It is *optional* — every call degrades to a miss
+/// when Redis is down so a laptop `cargo run` without Redis still works.
 #[derive(Clone)]
 pub struct Cache {
     inner: Option<ConnectionManager>,
+}
+
+/// `redis://:secret@host:6379/0` → `host:6379`. Log-safe form of a connection
+/// URL: scheme, credentials, path and query are dropped.
+pub fn redacted_host(url: &str) -> String {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let host_port = match rest.rsplit_once('@') {
+        Some((_, hp)) => hp,
+        None => rest,
+    };
+    host_port.split('/').next().unwrap_or("").to_string()
 }
 
 pub fn hex(input: &str) -> String {
@@ -54,7 +66,8 @@ impl Cache {
             redis::cmd("PING").arg("libra").query_async(&mut cm).await;
         match ping {
             Ok(_) => {
-                tracing::info!(url, "redis connected");
+                // Never log the URL: `redis://:password@host:6379` carries a credential.
+                tracing::info!(enabled = true, host = %redacted_host(url), "redis connected");
                 Cache { inner: Some(cm) }
             }
             Err(e) => {
@@ -95,5 +108,24 @@ impl Cache {
         if let Ok(raw) = serde_json::to_vec(value) {
             self.set_raw(key, &raw, ttl).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redacted_host;
+
+    #[test]
+    fn log_safe_host_drops_credentials() {
+        assert_eq!(
+            redacted_host("redis://:hunter2@cache.local:6379"),
+            "cache.local:6379"
+        );
+        assert_eq!(
+            redacted_host("rediss://user:p@ss@host.example:6380/0"),
+            "host.example:6380"
+        );
+        assert_eq!(redacted_host("redis://127.0.0.1:6379/1"), "127.0.0.1:6379");
+        assert_eq!(redacted_host(""), "");
     }
 }

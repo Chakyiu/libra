@@ -152,7 +152,7 @@ impl Config {
         dir.join("libra")
     }
 
-    fn defaults(data_dir: &PathBuf) -> Self {
+    pub(crate) fn defaults(data_dir: &PathBuf) -> Self {
         Self {
             port: std::env::var("PORT")
                 .ok()

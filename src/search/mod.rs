@@ -122,7 +122,7 @@ impl SearchHub {
     pub async fn run(&self, kind: SearchKind, q: &mut SearchQuery) -> SearchResponse {
         let cfg = self.cfg.get();
         q.kind = kind;
-        let key = self.cache_key(&cfg, q);
+        let key = Self::cache_key(&cfg, q);
         if let Some(hit) = self.cache.get_json::<SearchResponse>(&key).await {
             return hit;
         }
@@ -167,9 +167,11 @@ impl SearchHub {
         }
     }
 
-    fn cache_key(&self, cfg: &Config, q: &SearchQuery) -> String {
+    fn cache_key(cfg: &Config, q: &SearchQuery) -> String {
+        // The provider order is part of the key: changing it must not keep serving
+        // the previous engine's hits for the rest of `SEARCH_CACHE_TTL`.
         let raw = format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             q.kind.as_str(),
             q.query,
             q.num_results,
@@ -178,8 +180,39 @@ impl SearchHub {
             q.freshness.as_deref().unwrap_or(""),
             q.site.as_deref().unwrap_or(""),
             q.page.unwrap_or(1),
+            cfg.search_order_for(q.kind).join(","),
             cfg.enabled_providers.join(","),
         );
         format!("search:{}:{}", q.kind.as_str(), crate::cache::hex(&raw))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_cache_key_follows_the_provider_order() {
+        let mut cfg = crate::config::Config::defaults(&std::path::PathBuf::from("/tmp/libra-test"));
+        let q = SearchQuery {
+            query: "who won".into(),
+            kind: SearchKind::Web,
+            num_results: 8,
+            country: None,
+            language: None,
+            freshness: None,
+            safe_search: false,
+            site: None,
+            page: None,
+        };
+        let before = SearchHub::cache_key(&cfg, &q);
+        cfg.search_order_web = vec!["brave".into(), "searxng".into()];
+        let after = SearchHub::cache_key(&cfg, &q);
+        assert_ne!(
+            before, after,
+            "a changed provider order must not hit the previous engine's hits"
+        );
+        // The same order and query stay stable, so hits are still shared.
+        assert_eq!(after, SearchHub::cache_key(&cfg, &q));
     }
 }
