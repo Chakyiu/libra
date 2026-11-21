@@ -17,8 +17,8 @@ services:
     volumes:
       - libra-data:/data
       # msb keeps its guest images and sandbox state here; without a volume every job
-      # run re-downloads its image.
-      - microsandbox-data:/root/.microsandbox
+      # run re-downloads its image. This is $HOME of the image's unprivileged user.
+      - microsandbox-data:/home/libra/.microsandbox
     # Command jobs boot a microVM, so the container needs the hypervisor device. Linux
     # Docker Engine passes it straight through; Docker Desktop's Linux VM often does not
     # expose /dev/kvm at all. Check with: docker compose exec libra msb doctor
@@ -37,16 +37,26 @@ services:
     restart: unless-stopped
 
   searxng:
-    image: searxng/searxng:latest
+    # Pinned by digest: `latest` resolved to the 2026.11.21-c6ee3e9fd image on 2026-11-21.
+    # Bump the digest deliberately, and re-run the JSON search check with the bump.
+    image: searxng/searxng@sha256:fc1d81d7e9d04d3c8b3e23c7162feddf5c3d6aecd32e67a56eaabcb8d8747f79
+    # SearxNG is reached over the compose network as http://searxng:8080. Nothing is
+    # published on the host: the image proxy fetches whatever URL it is handed, so a
+    # host port would make this an unauthenticated fetch proxy next to Libra.
+    expose:
+      - "8080"
     volumes:
-      - ./docker/searxng:/etc/searxng:rw
+      # settings.yml ships read-only; the wrapper copies it into the volume below on
+      # start and generates the secret_key there, so no secret is tracked in git.
+      - ./docker/searxng:/opt/libra-searxng:ro
+      - searxng-config:/etc/searxng
+    entrypoint: ["/bin/sh", "/opt/libra-searxng/entrypoint.sh"]
     environment:
-      SEARXNG_BASE_URL: http://localhost:8888/
-    ports:
-      - "8888:8080"
+      SEARXNG_BASE_URL: http://searxng:8080/
     restart: unless-stopped
 
 volumes:
   libra-data:
   microsandbox-data:
   redis-data:
+  searxng-config:

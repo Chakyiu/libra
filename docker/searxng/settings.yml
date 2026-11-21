@@ -1,9 +1,13 @@
 use_default_settings: true
 
 server:
-  secret_key: "change-me-in-production"
+  # The limiter exists to keep a public instance usable; this one is only reachable from
+  # the compose network, and Libra's JSON requests would be throttled by it.
   limiter: false
-  image_proxy: true
+  # Off: the image proxy fetches any URL the caller names, which turns this service into
+  # a fetch proxy for whatever else runs on the network. Libra reads image results from
+  # the JSON API, which carries the original absolute image URL (src/search/searxng.rs).
+  image_proxy: false
 
 search:
   safe_search: 0

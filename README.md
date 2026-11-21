@@ -219,7 +219,17 @@ services:
     devices:
       - /dev/kvm:/dev/kvm        # Linux Docker Engine only
     volumes:
-      - microsandbox-data:/root/.microsandbox   # cached images survive restarts
+      - microsandbox-data:/home/libra/.microsandbox   # cached images survive restarts
+```
+
+The container runs as the unprivileged `libra` user (uid 10001), and `msb` runs as that
+user too — microsandbox itself needs no root. What it does need is read/write access to
+`/dev/kvm`, which is usually `root:kvm` mode `0660`: pass the group through as well, or `msb`
+reports `KVM access` as not read/write.
+
+```yaml
+    group_add:
+      - kvm                      # or setfacl -m u:10001:rw /dev/kvm on the host
 ```
 
 Check what a container can actually do with `docker compose exec libra /opt/microsandbox/bin/msb
