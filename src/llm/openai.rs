@@ -309,6 +309,28 @@ fn message_text(v: &Value) -> Option<String> {
     None
 }
 
+/// Place each vector at its own `index`, so one gap in the response cannot shift
+/// the rest onto the wrong chunks. A missing vector stays empty at its slot.
+fn embeddings_by_index(data: &[serde_json::Value], expected: usize) -> Vec<Vec<f32>> {
+    let mut out = vec![Vec::new(); expected];
+    for (pos, d) in data.iter().enumerate() {
+        let idx = d["index"].as_u64().map(|n| n as usize).unwrap_or(pos);
+        let Some(vals) = d["embedding"].as_array() else {
+            tracing::warn!("embedding response item {idx} has no vector; leaving it empty");
+            continue;
+        };
+        if idx >= expected {
+            tracing::warn!("embedding response index {idx} out of range for {expected} inputs");
+            continue;
+        }
+        out[idx] = vals
+            .iter()
+            .filter_map(|x| x.as_f64().map(|f| f as f32))
+            .collect();
+    }
+    out
+}
+
 pub async fn embed(
     http: &Client,
     base: &str,
@@ -328,18 +350,7 @@ pub async fn embed(
             &v.to_string()[..v.to_string().len().min(200)]
         );
     };
-    let mut out = Vec::with_capacity(data.len());
-    for d in data {
-        let Some(vals) = d["embedding"].as_array() else {
-            continue;
-        };
-        out.push(
-            vals.iter()
-                .filter_map(|x| x.as_f64().map(|f| f as f32))
-                .collect(),
-        );
-    }
-    Ok(out)
+    Ok(embeddings_by_index(data, texts.len()))
 }
 
 /// Ollama < 0.9 has no /v1/embeddings — use the native endpoint instead.
@@ -376,7 +387,7 @@ pub async fn ollama_embed_native(
 
 #[cfg(test)]
 mod tests {
-    use super::message_text;
+    use super::{embeddings_by_index, message_text};
     use serde_json::json;
 
     #[test]
@@ -389,5 +400,37 @@ mod tests {
     fn falls_back_to_reasoning_when_content_is_null() {
         let v = json!({"choices":[{"finish_reason":"length","message":{"content":null,"reasoning":"{\"queries\":[\"poe\"]}"}}]});
         assert_eq!(message_text(&v).as_deref(), Some("{\"queries\":[\"poe\"]}"));
+    }
+
+    #[test]
+    fn vectors_land_at_their_index_even_out_of_order() {
+        let data = vec![
+            json!({"index": 2, "embedding": [2.0, 2.0]}),
+            json!({"index": 0, "embedding": [0.0, 0.0]}),
+            json!({"index": 1, "embedding": [1.0, 1.0]}),
+        ];
+        assert_eq!(
+            embeddings_by_index(&data, 3),
+            vec![vec![0.0, 0.0], vec![1.0, 1.0], vec![2.0, 2.0]]
+        );
+    }
+
+    #[test]
+    fn missing_embedding_leaves_an_empty_slot_without_shifting() {
+        let data = vec![
+            json!({"index": 0, "embedding": [0.0]}),
+            json!({"index": 1}),
+            json!({"index": 2, "embedding": [2.0]}),
+        ];
+        assert_eq!(
+            embeddings_by_index(&data, 3),
+            vec![vec![0.0], vec![], vec![2.0]]
+        );
+    }
+
+    #[test]
+    fn missing_index_field_falls_back_to_position() {
+        let data = vec![json!({"embedding": [7.0]}), json!({"embedding": [8.0]})];
+        assert_eq!(embeddings_by_index(&data, 2), vec![vec![7.0], vec![8.0]]);
     }
 }

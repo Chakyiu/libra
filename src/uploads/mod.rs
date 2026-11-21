@@ -12,6 +12,9 @@ use std::sync::Arc;
 
 const CHUNK_SIZE: usize = 1200;
 const CHUNK_OVERLAP: usize = 200;
+/// Ceiling on the decompressed `word/document.xml` we are willing to read.
+/// A Word file is a zip, so its on-disk size says nothing about this.
+const DOCX_XML_CAP: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
@@ -60,7 +63,7 @@ impl UploadStore {
                 "{filename} has no readable text. Attach a text file, PDF, Word document, or an image."
             )));
         }
-        let text = extract_text(filename, bytes);
+        let text = extract_text(filename, bytes)?;
         let chunks = split_text(&text);
         if chunks.is_empty() || !readable(&text) {
             return Err(LibraError::BadRequest(format!(
@@ -229,16 +232,17 @@ fn readable(text: &str) -> bool {
     bad * 5 < sample.len()
 }
 
-pub fn extract_text(filename: &str, bytes: &[u8]) -> String {
+pub fn extract_text(filename: &str, bytes: &[u8]) -> Result<String, LibraError> {
     let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
-    match ext.as_str() {
+    Ok(match ext.as_str() {
         "pdf" => pdf_extract::extract_text_from_mem(bytes).unwrap_or_else(|e| {
             tracing::warn!("pdf parse failed for {filename}: {e}");
             String::new()
         }),
-        "docx" => docx_text(bytes).unwrap_or_default(),
+        "docx" => docx_text(bytes)
+            .map_err(|e| LibraError::BadRequest(format!("{filename} could not be read: {e}")))?,
         _ => String::from_utf8_lossy(bytes).into_owned(),
-    }
+    })
 }
 
 fn docx_text(bytes: &[u8]) -> Result<String, std::io::Error> {
@@ -246,8 +250,18 @@ fn docx_text(bytes: &[u8]) -> Result<String, std::io::Error> {
     let mut cursor = Cursor::new(bytes);
     let mut zip = zip::ZipArchive::new(&mut cursor)?;
     let mut xml = String::new();
-    if let Ok(mut f) = zip.by_name("word/document.xml") {
-        f.read_to_string(&mut xml)?;
+    if let Ok(f) = zip.by_name("word/document.xml") {
+        // Check the declared size first, then cap the read anyway: the entry
+        // header is attacker-controlled, and reading it whole would allocate
+        // whatever it inflates to.
+        if f.size() > DOCX_XML_CAP {
+            return Err(too_large());
+        }
+        let mut capped = f.take(DOCX_XML_CAP + 1);
+        capped.read_to_string(&mut xml)?;
+        if xml.len() as u64 > DOCX_XML_CAP {
+            return Err(too_large());
+        }
     }
     // paragraph breaks, then strip tags
     let xml = xml.replace("</w:p>", "\n");
@@ -262,6 +276,16 @@ fn docx_text(bytes: &[u8]) -> Result<String, std::io::Error> {
         }
     }
     Ok(out)
+}
+
+fn too_large() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!(
+            "file too large: the document body expands past the {} MiB limit",
+            DOCX_XML_CAP / 1024 / 1024
+        ),
+    )
 }
 
 /// Character windows with overlap — same shape as upstream's `splitText`.
@@ -353,5 +377,43 @@ mod tests {
         .unwrap();
         let bytes = w.finish().unwrap().into_inner();
         assert_eq!(docx_text(&bytes).unwrap(), "Hello\nWorld\n");
+    }
+
+    /// A small compressed zip whose `word/document.xml` inflates far past the cap.
+    /// Kept at a small multiple of the cap (4x) so a missing cap stays survivable.
+    fn docx_bomb(xml_len: usize) -> Vec<u8> {
+        let mut xml = String::with_capacity(xml_len + 64);
+        xml.push_str("<w:document>");
+        while xml.len() < xml_len {
+            xml.push_str("<w:p><w:t>the quick brown fox jumps over the lazy dog</w:t></w:p>");
+        }
+        xml.push_str("</w:document>");
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        w.start_file("word/document.xml", opts).unwrap();
+        use std::io::Write as _;
+        w.write_all(xml.as_bytes()).unwrap();
+        w.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn docx_bomb_is_rejected_at_the_cap() {
+        let cap = DOCX_XML_CAP as usize;
+        let bomb = docx_bomb(cap * 4);
+        assert!(
+            bomb.len() < cap / 4,
+            "zip should stay small ({}) vs cap ({})",
+            bomb.len(),
+            cap
+        );
+        // Repeat so an external sampler has time to observe peak RSS.
+        for _ in 0..5 {
+            let err = extract_text("notes.docx", &bomb)
+                .expect_err("oversized document.xml must not be read")
+                .to_string();
+            assert!(err.contains("file too large"), "unexpected error: {err}");
+            println!("rejected: {err}");
+        }
     }
 }
