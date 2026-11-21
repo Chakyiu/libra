@@ -10,3 +10,6 @@ web/out
 web/next-env.d.ts
 .DS_Store
 push_registry.sh
+desktop/node_modules
+desktop/src-tauri/target
+desktop/src-tauri/gen/schemas
