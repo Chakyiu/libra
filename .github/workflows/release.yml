@@ -1,0 +1,163 @@
+name: Release
+
+# Publishing is deliberate: a v* tag, or a manual dispatch. Never on every push.
+# The same script that a maintainer runs locally (scripts/release.sh) enforces the same
+# version guard, so the two paths cannot disagree about what version is being shipped.
+#
+# The image push needs Docker Hub credentials and the GitHub Release does not, so the two
+# are independent steps: a tag pushed from a host that already ran scripts/release.sh
+# still gets a Release with no secrets configured.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to publish (default: v<Cargo.toml version>)"
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: docker.io/chakyiu/libra
+
+jobs:
+  guard:
+    name: guard (tag == Cargo.toml version)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      # No explicit ref: on a tag push this checks out the tag's commit, and a dispatch
+      # checks out the branch it was dispatched from. fetch-depth 0 brings the tags, so
+      # the version step can read the tag's own tree either way.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        # Event values reach the shell through env, never interpolated into the script:
+        # a dispatch input containing `"; ...` is data here, not a command.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          version_of() {
+            git show "$1:$2" | sed -n "$3" | head -n1
+          }
+
+          tag="${REF_NAME}"
+          if [ "${EVENT_NAME}" != "push" ]; then
+            # A dispatch with no tag names the version on the ref it is standing on.
+            tag="${INPUT_TAG}"
+            if [ -z "${tag}" ]; then
+              head_version="$(version_of HEAD Cargo.toml 's/^version = "\(.*\)"$/\1/p')"
+              [ -n "${head_version}" ] || { echo "no [package] version in Cargo.toml" >&2; exit 1; }
+              tag="v${head_version}"
+            fi
+          fi
+
+          printf '%s' "${tag}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$' \
+            || { echo "not a v<major>.<minor>.<patch> tag: ${tag}" >&2; exit 1; }
+          git rev-parse -q --verify "refs/tags/${tag}^{commit}" >/dev/null \
+            || { echo "tag ${tag} does not exist" >&2; exit 1; }
+
+          # Read the version out of the tag's tree, not the checked-out branch: a tag
+          # whose Cargo.toml says something else must fail on dispatch too.
+          cargo_version="$(version_of "${tag}" Cargo.toml 's/^version = "\(.*\)"$/\1/p')"
+          web_version="$(version_of "${tag}" web/package.json 's/^  "version": "\(.*\)",$/\1/p')"
+          [ -n "${cargo_version}" ] || { echo "no [package] version in Cargo.toml" >&2; exit 1; }
+          [ -n "${web_version}" ] || { echo "no version in web/package.json" >&2; exit 1; }
+          [ "${cargo_version}" = "${web_version}" ] || {
+            echo "Cargo.toml is ${cargo_version} but web/package.json is ${web_version}" >&2; exit 1; }
+          [ "v${cargo_version}" = "${tag}" ] || {
+            echo "tag ${tag} does not match Cargo.toml version ${cargo_version}" >&2; exit 1; }
+
+          echo "version=${cargo_version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: image + GitHub Release
+    needs: guard
+    runs-on: ubuntu-latest
+    # The release record is written by this job; the guard job only reads.
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.guard.outputs.tag }}
+      VERSION: ${{ needs.guard.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+          fetch-depth: 0
+      # Decided once, before anything runs, and reported: unset secrets are the normal
+      # case for a host that pushed the image itself with `docker login`.
+      - name: registry credentials?
+        id: creds
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "${DOCKERHUB_USERNAME}" ] && [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN unset; skipping the image push, the Release is still created"
+          fi
+      # First, because it needs nothing but the tag. A failed login below must not leave
+      # the tag without its Release.
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists; leaving it alone"
+            exit 0
+          fi
+          notes="$(mktemp)"
+          cat > "${notes}" <<EOF
+          Libra ${VERSION}
+
+          Published image:
+
+          \`\`\`
+          docker pull ${IMAGE}:${VERSION}
+          \`\`\`
+
+          Or run it from Compose (pull instead of build):
+
+          \`\`\`
+          export LIBRA_AUTH_TOKEN="\$(openssl rand -hex 24)"
+          docker compose pull && docker compose up --no-build
+          \`\`\`
+
+          Health check: \`curl http://127.0.0.1:3001/health\`.
+          EOF
+          gh release create "${TAG}" --title "Libra ${VERSION}" --notes-file "${notes}"
+      - if: steps.creds.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - if: steps.creds.outputs.push == 'true'
+        uses: docker/setup-buildx-action@v3
+      # linux/amd64 only: the pinned Obscura and microsandbox releases this image
+      # installs are fetched per-architecture by the Dockerfile, and letting buildx
+      # emulate arm64 would only test the emulator, not the image.
+      - if: steps.creds.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.guard.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
