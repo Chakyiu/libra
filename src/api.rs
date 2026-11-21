@@ -34,7 +34,16 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/chats/{id}/stop", post(stop_chat))
         .route("/chats/{id}/location", post(provide_location))
         .route("/ask", post(ask))
-        .route("/upload", post(upload))
+        // axum caps every request body at 2 MB, and `Multipart` keeps that cap, so a
+        // 3 MB file 400s ("Error parsing `multipart/form-data`") long before the
+        // MAX_UPLOAD_MB check runs. Raise the cap on this route only. The number is
+        // read at startup, so a live MAX_UPLOAD_MB change takes effect on restart.
+        .route(
+            "/upload",
+            post(upload).layer(axum::extract::DefaultBodyLimit::max(
+                app.settings.get().max_upload_mb * 1024 * 1024,
+            )),
+        )
         .route("/search", get(search))
         .route("/suggestions", get(suggestions))
         .route("/discover", get(discover))
@@ -665,9 +674,102 @@ fn checked_job(app: &Arc<App>, body: Job, existing: Option<&Job>) -> LibraResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::Cache;
+    use crate::config::{Config, SettingsHandle};
+    use crate::db::Db;
+    use axum::body::Body;
+    use axum::http::Request as HttpRequest;
+    use tower::ServiceExt;
 
     fn header(v: &str) -> HeaderValue {
         HeaderValue::from_str(v).unwrap()
+    }
+
+    async fn test_app(max_upload_mb: usize) -> Arc<App> {
+        let mut cfg = Config::defaults(&std::env::temp_dir());
+        cfg.max_upload_mb = max_upload_mb;
+        let db_path =
+            std::env::temp_dir().join(format!("libra-api-{}.sqlite", uuid::Uuid::new_v4()));
+        let db = Arc::new(Db::connect(db_path.to_str().unwrap()).await.unwrap());
+        let cache = Cache::new("redis://127.0.0.1:6379", false).await;
+        Arc::new(App::new(SettingsHandle::new(cfg), db, cache).unwrap())
+    }
+
+    /// One `chatId` field and one `files` field, like the upload form posts.
+    fn multipart_body(filename: &str, content: &[u8]) -> Vec<u8> {
+        const BOUNDARY: &str = "----libratest";
+        let mut body = Vec::new();
+        body.extend_from_slice(
+            format!(
+                "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"chatId\"\r\n\r\nchat-1\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(
+            format!(
+                "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(content);
+        body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+        body
+    }
+
+    fn upload_request(body: Vec<u8>) -> HttpRequest<Body> {
+        HttpRequest::builder()
+            .method("POST")
+            .uri("/api/upload")
+            .header(
+                "content-type",
+                "multipart/form-data; boundary=----libratest",
+            )
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_three_megabyte_upload_reaches_the_handler() {
+        // axum's own body cap is 2,097,152 bytes and it sat in front of MAX_UPLOAD_MB,
+        // so a 3 MB file failed while the body was read. A file the handler actually
+        // read ends up in ingest, which without a configured provider answers 412.
+        let app = test_app(25).await;
+        let content = vec![b'a'; 3 * 1024 * 1024];
+        let body = multipart_body("notes.txt", &content);
+        let res = router(app).oneshot(upload_request(body)).await.unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::PRECONDITION_FAILED,
+            "a 3 MB upload never reached the handler; axum's 2 MB body cap stopped it"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_upload_over_the_configured_limit_is_rejected() {
+        // The route cap must follow MAX_UPLOAD_MB, not just be disabled.
+        let app = test_app(1).await;
+        let content = vec![b'a'; 2 * 1024 * 1024];
+        let body = multipart_body("notes.txt", &content);
+        let res = router(app).oneshot(upload_request(body)).await.unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "a 2 MB upload was not stopped by MAX_UPLOAD_MB=1"
+        );
+    }
+
+    #[tokio::test]
+    async fn other_routes_keep_axums_default_cap() {
+        // Raising the cap must be scoped to /api/upload.
+        let app = test_app(25).await;
+        let request = HttpRequest::builder()
+            .method("PUT")
+            .uri("/api/settings")
+            .header("content-type", "application/json")
+            .body(Body::from(vec![b'\"'; 3 * 1024 * 1024]))
+            .unwrap();
+        let res = router(app).oneshot(request).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[test]

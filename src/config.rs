@@ -441,24 +441,7 @@ impl Config {
     /// Search and server settings only. Model providers and the models picked from them live in
     /// settings.json, written from the Settings page.
     fn apply_env(&mut self) {
-        if let Ok(v) = std::env::var("BRAVE_API_KEY") {
-            self.brave_api_key = v;
-        }
-        if let Ok(v) = std::env::var("EXA_API_KEY") {
-            self.exa_api_key = v;
-        }
-        if let Ok(v) = std::env::var("TAVILY_API_KEY") {
-            self.tavily_api_key = v;
-        }
-        if let Ok(v) = std::env::var("FIRECRAWL_API_KEY") {
-            self.firecrawl_api_key = v;
-        }
-        if let Ok(v) = std::env::var("TELEGRAM_BOT_TOKEN") {
-            self.telegram_bot_token = v;
-        }
-        if let Ok(v) = std::env::var("TELEGRAM_CHAT_ID") {
-            self.telegram_chat_id = v;
-        }
+        self.apply_text_env(|k| std::env::var(k).ok());
         if std::env::var("OBSCURA_DISABLED").ok().as_deref() == Some("1") {
             self.read_pages = false;
         }
@@ -496,6 +479,36 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VIDEO_SEARCH_ORDER") {
             self.search_order_videos = split_list(&v);
+        }
+    }
+
+    /// The search and Telegram keys are also saved in settings.json, and a blank variable must
+    /// not wipe what is there: `cp .env.example .env` ships `BRAVE_API_KEY=` and friends empty,
+    /// so on the first restart the key from Settings used to become "". Unset, blank, or
+    /// whitespace-only therefore leaves the saved value alone; a real value still wins.
+    fn apply_text_env(&mut self, get: impl Fn(&str) -> Option<String>) {
+        let text = |name: &str| {
+            get(name)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        if let Some(v) = text("BRAVE_API_KEY") {
+            self.brave_api_key = v;
+        }
+        if let Some(v) = text("EXA_API_KEY") {
+            self.exa_api_key = v;
+        }
+        if let Some(v) = text("TAVILY_API_KEY") {
+            self.tavily_api_key = v;
+        }
+        if let Some(v) = text("FIRECRAWL_API_KEY") {
+            self.firecrawl_api_key = v;
+        }
+        if let Some(v) = text("TELEGRAM_BOT_TOKEN") {
+            self.telegram_bot_token = v;
+        }
+        if let Some(v) = text("TELEGRAM_CHAT_ID") {
+            self.telegram_chat_id = v;
         }
     }
 
@@ -635,6 +648,40 @@ mod tests {
         assert_eq!(p.id, "openrouter");
         assert_eq!(m, "anthropic/claude-3.5-sonnet");
         assert!(cfg.resolve_model("nope/model").is_none());
+    }
+
+    #[test]
+    fn a_blank_env_var_does_not_wipe_a_saved_key() {
+        // `cp .env.example .env` sets BRAVE_API_KEY= (and the other three, and the Telegram
+        // pair) to empty; dotenvy loads those blanks, and they must not beat the settings file.
+        let mut cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
+        cfg.apply_settings(&serde_json::json!({
+            "braveApiKey": "saved-brave",
+            "exaApiKey": "saved-exa",
+            "tavilyApiKey": "saved-tavily",
+            "firecrawlApiKey": "saved-firecrawl",
+            "telegramBotToken": "saved-bot",
+            "telegramChatId": "saved-chat"
+        }));
+        cfg.apply_text_env(|_| Some(String::new()));
+        cfg.apply_text_env(|_| Some("   ".into()));
+        assert_eq!(cfg.brave_api_key, "saved-brave");
+        assert_eq!(cfg.exa_api_key, "saved-exa");
+        assert_eq!(cfg.tavily_api_key, "saved-tavily");
+        assert_eq!(cfg.firecrawl_api_key, "saved-firecrawl");
+        assert_eq!(cfg.telegram_bot_token, "saved-bot");
+        assert_eq!(cfg.telegram_chat_id, "saved-chat");
+    }
+
+    #[test]
+    fn a_real_env_var_still_beats_the_saved_key() {
+        // README: env vars are the top of the precedence chain.
+        let mut cfg = Config::defaults(&PathBuf::from("/tmp/libra-test"));
+        cfg.brave_api_key = "saved-brave".into();
+        cfg.exa_api_key = "saved-exa".into();
+        cfg.apply_text_env(|k| (k == "BRAVE_API_KEY").then(|| " env-brave ".to_string()));
+        assert_eq!(cfg.brave_api_key, "env-brave");
+        assert_eq!(cfg.exa_api_key, "saved-exa");
     }
 
     #[test]

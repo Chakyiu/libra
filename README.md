@@ -260,6 +260,11 @@ Everything in `.env.example` can also be changed at runtime from `/settings`. Pr
 env vars  →  $LIBRA_DATA_DIR/settings.json  →  PUT /api/settings (live, no restart)
 ```
 
+An empty or unset variable leaves the saved value alone. `.env.example` ships
+`BRAVE_API_KEY=`, `EXA_API_KEY=`, `TAVILY_API_KEY=`, `FIRECRAWL_API_KEY=` and the Telegram pair
+empty, so a key typed into Settings survives a restart; only a variable with a real value in it
+takes precedence.
+
 Settings are held in an `Arc<RwLock<Config>>`; a change swaps the `Arc` and each in-flight request
 keeps the snapshot it started with. No subsystem rebuild, no restart. Model providers and the models
 chosen from them are the exception — those come only from Settings, never from env vars.
