@@ -1,0 +1,65 @@
+name: publish
+
+# Publishes the production image to GitHub Container Registry.
+# The image name is lowercase because GHCR rejects `Chakyiu/libra`.
+#
+# Deliberately not triggered by pull_request: a fork's GITHUB_TOKEN is read-only
+# even when this file asks for `packages: write`, and a pull request should not
+# publish. `workflow_dispatch` exists so a release can be re-pushed by hand.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+# A push of two commits in a row should still publish both, in order.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+# The CI workflow stays read-only (contents: read); this is the only job that
+# may write a package.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/chakyiu/libra
+  # One platform on purpose. The Dockerfile picks its Obscura and microsandbox
+  # assets per architecture, but only amd64 is built and pulled here.
+  PLATFORMS: linux/amd64
+
+jobs:
+  publish:
+    name: build and push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Same-repo push needs no PAT: the run's own GITHUB_TOKEN, scoped by the
+      # `packages: write` permission above, can publish this repo's package.
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # commit SHA tag always; a moving `main` tag on branches; semver tags for `v*`.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
