@@ -105,10 +105,11 @@ rerank   → orders the surviving sources by relevance.
 ## Quickstart
 
 ```bash
-docker compose up --build          # UI + API on http://localhost:3001
+export LIBRA_AUTH_TOKEN="$(openssl rand -hex 24)"
+docker compose up --build          # UI + API on http://localhost:3001 (published on loopback only)
 ```
 
-That brings up Libra, Redis and a SearxNG metasearch container. A fresh instance has no model
+Compose requires an auth token and publishes port 3001 only on loopback. A fresh instance has no model
 providers: open **`http://localhost:3001/settings/?tab=providers`**, add one (Ollama, OpenAI,
 OpenRouter, Anthropic, Gemini or any OpenAI-compatible server) with the models it serves, and ask
 something. Nothing else needs configuring — search works through the bundled SearxNG.
@@ -117,13 +118,14 @@ something. Nothing else needs configuring — search works through the bundled S
 
 ```bash
 cp .env.example .env                # optional: search keys, Redis, ports
-cargo run                           # API + UI on :3001 (serves web/out)
+HOST=127.0.0.1 cargo run            # no token needed for local-only access
 
 # front end development, hot reload, proxies /api to :3001
 cd web && npm install && npm run dev    # http://localhost:3000
 ```
 
-Build the UI first if `web/out` is missing: `cd web && npm run build`.
+Build the UI first if `web/out` is missing: `cd web && npm run build`. Set `LIBRA_AUTH_TOKEN` to use
+any non-loopback `HOST` (including the default `0.0.0.0`); Libra refuses to start otherwise.
 
 Redis is optional. If `REDIS_URL` is unreachable the service logs a warning and runs with caching
 disabled; `REDIS_DISABLED=1` skips the connection attempt entirely. SearxNG and every search key are
@@ -269,7 +271,12 @@ LIBRA_ALLOWED_ORIGINS=                     # browser origins allowed to call /ap
 With a token set, the UI shows an unlock screen once per browser and keeps the token in
 `localStorage`. It is read from the environment only — never from `settings.json`, and never
 returned by `GET /api/settings`. `/api/health` needs it too, so a locked instance leaks nothing
-about your providers.
+about your providers. With no token, Libra starts only when `HOST` is a literal loopback IP such as
+`127.0.0.1` or `::1`; wildcard binds (`0.0.0.0` and `[::]`) require `LIBRA_AUTH_TOKEN`.
+
+Compose binds `3001` to `127.0.0.1` by default and requires `LIBRA_AUTH_TOKEN`. To expose Libra to a
+LAN or the internet, keep the token set, change the Compose port mapping to `3001:3001`, and put it
+behind a TLS reverse proxy; never expose the port without authentication.
 
 `LIBRA_ALLOWED_ORIGINS` is **empty by default**, which means same-origin only: the single-binary
 deployment serves the UI and the API from one origin, so it needs no CORS at all, and the Next dev

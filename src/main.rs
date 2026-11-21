@@ -35,6 +35,13 @@ async fn main() -> anyhow::Result<()> {
 
     dotenvy::dotenv().ok();
     let cfg = Config::load()?;
+    Config::validate_bind(&cfg.host, &cfg.auth_token)?;
+    let host = cfg
+        .host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(&cfg.host);
+    let listener = tokio::net::TcpListener::bind((host, cfg.port)).await?;
     tracing::info!(data_dir = %cfg.data_dir.display(), db = %cfg.db_path.display(), "loaded config");
 
     let db = Arc::new(Db::connect(&cfg.db_path.to_string_lossy()).await?);
@@ -45,8 +52,6 @@ async fn main() -> anyhow::Result<()> {
     let app = Arc::new(App::new(settings, db, cache)?);
     crate::automator::spawn(&app);
 
-    let addr = format!("{}:{}", cfg.host, cfg.port);
-    let listener = tokio::net::TcpListener::bind(addr.as_str()).await?;
     tracing::info!("Libra listening on http://{}:{}", cfg.host, cfg.port);
     axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())
