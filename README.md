@@ -223,7 +223,14 @@ services:
 ```
 
 The container runs as the unprivileged `libra` user (uid 10001), and `msb` runs as that
-user too — microsandbox itself needs no root. What it does need is read/write access to
+user too — microsandbox itself needs no root. Coming from an older root-running image, the
+named volumes stay `root`-owned, so hand them over once:
+
+```sh
+docker compose run --rm --user 0 --entrypoint sh libra -c 'chown -R 10001:10001 /data /home/libra/.microsandbox'
+```
+
+What `msb` does need is read/write access to
 `/dev/kvm`, which is usually `root:kvm` mode `0660`: pass the group through as well, or `msb`
 reports `KVM access` as not read/write.
 
