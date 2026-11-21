@@ -109,6 +109,17 @@ export LIBRA_AUTH_TOKEN="$(openssl rand -hex 24)"
 docker compose up --build          # UI + API on http://localhost:3001 (published on loopback only)
 ```
 
+The same file also names a published image (`chakyiu/libra`), so a checkout is not required to
+run it — pull the released image instead of building one:
+
+```bash
+export LIBRA_AUTH_TOKEN="$(openssl rand -hex 24)"
+docker compose pull && docker compose up --no-build
+```
+
+`LIBRA_IMAGE=chakyiu/libra:<tag> docker compose pull && LIBRA_IMAGE=chakyiu/libra:<tag> docker compose up --no-build`
+pins a version other than the one in `docker-compose.yml`.
+
 Compose requires an auth token and publishes port 3001 only on loopback. A fresh instance has no model
 providers: open **`http://localhost:3001/settings/?tab=providers`**, add one (Ollama, OpenAI,
 OpenRouter, Anthropic, Gemini or any OpenAI-compatible server) with the models it serves, and ask
@@ -367,6 +378,7 @@ src/
 web/                 Next.js app router + plain CSS from the design/ mockups (static export)
 design/              static HTML mockups the UI was built from
 docker/              searxng settings
+docs/releasing.md    how a release is cut (script, tag, Docker image)
 ```
 
 ## Development
@@ -376,6 +388,8 @@ cargo run                          # backend on :3001
 cd web && npm run dev              # frontend on :3000, /api proxied to :3001
 cargo test                         # prompts, JSON extraction, chunking, docx, config, widgets
 ```
+
+Cutting a release (version bump, tag, Docker image) is in [docs/releasing.md](docs/releasing.md).
 
 The whole pipeline can be exercised without a single API key:
 

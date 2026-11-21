@@ -1,5 +1,9 @@
 services:
   libra:
+    # Published image is the default path: `docker compose pull && docker compose up --no-build`.
+    # `build: .` stays so a checkout can still be built locally (`docker compose up --build`),
+    # and LIBRA_IMAGE overrides the tag for a fork or a pinned version.
+    image: ${LIBRA_IMAGE:-chakyiu/libra:0.1.0}
     build: .
     ports:
       - "127.0.0.1:3001:3001"

@@ -1,0 +1,115 @@
+name: Release
+
+# Publishing is deliberate: a v* tag, or a manual dispatch. Never on every push.
+# The same script that a maintainer runs locally (scripts/release.sh) enforces the same
+# version guard, so the two paths cannot disagree about what version is being shipped.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to publish (default: v<Cargo.toml version>)"
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: docker.io/chakyiu/libra
+
+jobs:
+  guard:
+    name: guard (tag == Cargo.toml version)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      # No explicit ref: on a tag push this checks out the tag's commit, and a dispatch
+      # checks out the branch it was dispatched from — either way the version below is
+      # read from the code being published.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        run: |
+          set -euo pipefail
+          tag="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          web_version="$(sed -n 's/^  "version": "\(.*\)",$/\1/p' web/package.json | head -n1)"
+          [ -n "$cargo_version" ] || { echo "no [package] version in Cargo.toml" >&2; exit 1; }
+          [ "$cargo_version" = "$web_version" ] || {
+            echo "Cargo.toml is $cargo_version but web/package.json is $web_version" >&2; exit 1; }
+          # A dispatch with no tag names the Cargo.toml version it is standing on.
+          tag="${tag:-v$cargo_version}"
+          if [ "v$cargo_version" != "$tag" ]; then
+            echo "tag $tag does not match Cargo.toml version $cargo_version" >&2; exit 1
+          fi
+          git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
+            || { echo "tag $tag does not exist" >&2; exit 1; }
+          echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: push image + GitHub Release
+    needs: guard
+    runs-on: ubuntu-latest
+    # The release record is written by this job; the guard job only reads.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+          fetch-depth: 0
+      # Credentials live in repo secrets and are never printed. Missing secrets fail
+      # here rather than silently pushing nothing.
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      # linux/amd64 only: the pinned Obscura and microsandbox releases this image
+      # installs are fetched per-architecture by the Dockerfile, and letting buildx
+      # emulate arm64 would only test the emulator, not the image.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.guard.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.guard.outputs.tag }}"
+          version="${{ needs.guard.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists; leaving it alone"
+            exit 0
+          fi
+          cat > /tmp/notes.md <<EOF
+          Libra ${version}
+
+          Published image:
+
+          \`\`\`
+          docker pull ${IMAGE}:${version}
+          \`\`\`
+
+          Or run it from Compose (pull instead of build):
+
+          \`\`\`
+          export LIBRA_AUTH_TOKEN="\$(openssl rand -hex 24)"
+          docker compose pull && docker compose up --no-build
+          \`\`\`
+
+          Health check: \`curl http://127.0.0.1:3001/health\`.
+          EOF
+          gh release create "$tag" --title "Libra ${version}" --notes-file /tmp/notes.md --generate-notes
