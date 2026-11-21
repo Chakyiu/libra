@@ -90,13 +90,13 @@ RUN set -eu; \
 COPY --from=build /app/target/release/libra /usr/local/bin/libra
 COPY --from=web /app/web/out /app/web/out
 
-# An unprivileged account for the server, its data volume and msb's cache. /data is a
-# volume; Docker initialises it from this layer, so it keeps the ownership set here.
+# The entrypoint repairs mounted data ownership as root, then drops to this unprivileged user.
 RUN groupadd -g 10001 libra \
  && useradd -u 10001 -g libra -M -d /home/libra -s /usr/sbin/nologin libra \
  && mkdir -p /home/libra/.microsandbox /data \
  && chown -R libra:libra /home/libra /data
-USER libra
+COPY docker/entrypoint.sh /usr/local/bin/libra-entrypoint
+RUN chmod 755 /usr/local/bin/libra-entrypoint
 ENV HOME=/home/libra
 
 ENV PORT=3001 \
@@ -107,4 +107,5 @@ ENV PORT=3001 \
     RUST_LOG=info
 VOLUME /data
 EXPOSE 3001
+ENTRYPOINT ["/usr/local/bin/libra-entrypoint"]
 CMD ["libra"]
