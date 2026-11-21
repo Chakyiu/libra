@@ -1,0 +1,58 @@
+name: CI
+
+# Two independent checks, run in parallel:
+#   rust — the 99 offline tests plus the formatting gate
+#   web  — the static export the binary serves (web/out)
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the Dockerfile's `FROM rust:1.95-bookworm`, so CI tests the
+      # toolchain the image actually builds with. Bump both together.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+          components: rustfmt
+
+      # Keyed on Cargo.lock by default; a dependency bump invalidates it.
+      # The cold compile is the slow part, the tests themselves take seconds.
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --check
+
+      # Default `cargo test`: the three live-network widget tests
+      # (currency/stocks quotes) stay ignored — no outbound calls in CI.
+      - run: cargo test
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      # Matches the Dockerfile's `FROM node:22-alpine`.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # next build with `output: "export"` — the same build the image runs,
+      # which writes web/out for the Rust binary to serve.
+      - run: npm run build
