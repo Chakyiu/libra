@@ -112,6 +112,14 @@ pub struct Config {
     /// Origins allowed to call the API from a browser. Empty = same-origin only,
     /// which is what the single-binary deployment needs. `["*"]` is the dev escape hatch.
     pub allowed_origins: Vec<String>,
+
+    /// PEM bundle (one or more certificates) to trust on top of the built-in roots, for a
+    /// provider behind a private CA or a self-signed certificate. Env-only:
+    /// `LIBRA_TLS_CA_FILE`. Unset trusts the public roots alone.
+    pub tls_ca_file: Option<PathBuf>,
+    /// Accept any certificate on outbound HTTPS. Env-only: `LIBRA_TLS_SKIP_VERIFY=1`.
+    /// Off by default; meant for a self-signed provider you own on a LAN.
+    pub tls_skip_verify: bool,
 }
 
 /// Hot-swappable handle to the active config: a settings change swaps the Arc, and each
@@ -262,6 +270,13 @@ impl Config {
             allowed_origins: split_list(
                 &std::env::var("LIBRA_ALLOWED_ORIGINS").unwrap_or_default(),
             ),
+            tls_ca_file: std::env::var("LIBRA_TLS_CA_FILE")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(PathBuf::from),
+            tls_skip_verify: std::env::var("LIBRA_TLS_SKIP_VERIFY")
+                .map(|v| matches!(v.trim(), "1" | "true" | "yes" | "on"))
+                .unwrap_or(false),
         }
     }
 
