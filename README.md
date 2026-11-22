@@ -381,6 +381,7 @@ src/
   prompts/           every LLM prompt; all of them return strict JSON
 web/                 Next.js app router + plain CSS from the design/ mockups (static export)
 design/              static HTML mockups the UI was built from
+desktop/             Tauri 2 window that opens a server URL (see desktop/README.md)
 docker/              searxng settings
 docs/releasing.md    how a release is cut (script, tag, Docker image)
 ```
@@ -410,6 +411,15 @@ The screenshots in this README were taken that way: the real UI and the real pip
 stub OpenAI-compatible model (same trick as `scripts/mock-llm.py`, with different canned text) and a
 stub SearxNG, so they do not depend on anyone's API keys. The answer text and the source list are
 representative rather than real.
+
+## Desktop app
+
+`desktop/` is a Tauri 2 window that opens a libra server: type the URL of an
+instance that already serves its own UI and the window becomes that instance. It
+starts no server and keeps no libra data, so the page and the API stay on one
+origin and the existing unlock flow works unchanged. Second launch focuses the
+first window; the last URL is offered on the next start. Build with
+`cd desktop && npm install && npm run build`.
 
 ## Known limits
 

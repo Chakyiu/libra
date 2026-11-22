@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The bundled start screen may invoke the app's own commands. Remote origins are deliberately absent: once the window navigates to a server, Tauri IPC is closed to that page.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

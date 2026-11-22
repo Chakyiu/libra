@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>libra</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="start">
+      <div class="start__inner">
+        <h1 class="start__title">libra</h1>
+        <p class="start__lead">Open a libra server.</p>
+        <form id="server-form" class="start__form" novalidate>
+          <label class="start__label" for="server-url">Server URL</label>
+          <div class="start__row">
+            <input
+              id="server-url"
+              name="url"
+              type="text"
+              inputmode="url"
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              placeholder="http://192.168.1.8:3001"
+            />
+            <button type="submit">Open</button>
+          </div>
+          <p id="error" class="start__error" role="alert" hidden></p>
+          <p class="start__hint">
+            The address of a libra instance that already serves its own UI, on this
+            machine or another. This app starts no server and keeps no libra data.
+          </p>
+        </form>
+      </div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

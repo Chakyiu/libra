@@ -1,0 +1,14 @@
+{
+  "name": "libra-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tauri window for a libra server",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icon": "tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

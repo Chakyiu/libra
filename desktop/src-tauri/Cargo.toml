@@ -1,0 +1,15 @@
+[package]
+name = "libra-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Tauri window that opens a libra server URL"
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+url = "2"
