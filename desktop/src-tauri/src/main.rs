@@ -9,6 +9,8 @@
 use std::{fs, path::PathBuf};
 
 use tauri::{AppHandle, Manager};
+#[cfg(target_os = "macos")]
+use tauri::{webview::PageLoadEvent, Webview};
 use url::Url;
 
 /// The last URL the person opened. Kept next to the app's own config, never in
@@ -89,6 +91,19 @@ fn open_server_url(app: AppHandle, url: String) -> Result<(), String> {
     window.navigate(target).map_err(|err| err.to_string())
 }
 
+/// `WebviewWindow::set_focus` only keys the NSWindow. On macOS that leaves the
+/// WKWebView out of the responder chain, so `input.focus()` and typed keys
+/// never reach the page. `Webview::set_focus` calls `makeFirstResponder`.
+#[cfg(target_os = "macos")]
+fn focus_page(webview: &Webview) {
+    let _ = webview.window().set_focus();
+    let _ = webview.set_focus();
+    let _ = webview.eval(
+        "document.getElementById('server-url')?.focus();\
+         document.querySelector('.unlock input')?.focus();",
+    );
+}
+
 fn main() {
     tauri::Builder::default()
         // Registered first so a second launch never builds a second window.
@@ -99,6 +114,14 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
+        .on_page_load(|webview, payload| {
+            #[cfg(target_os = "macos")]
+            if payload.event() == PageLoadEvent::Finished {
+                focus_page(webview);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (webview, payload);
+        })
         .invoke_handler(tauri::generate_handler![last_server_url, open_server_url])
         .run(tauri::generate_context!())
         .expect("libra desktop failed to start");
