@@ -117,6 +117,8 @@ export LIBRA_AUTH_TOKEN="$(openssl rand -hex 24)"
 docker compose pull && docker compose up --no-build
 ```
 
+At startup, if the entrypoint already runs as uid 10001, it skips ownership changes and starts Libra when `/data` is writable. Otherwise it repairs `/data` for uid 10001 as root, then drops privileges before starting Libra. This handles fresh and existing named volumes and writable bind mounts without a separate host-side chown step. On bind mounts, the root initialization path changes the host directory and its contents to uid/gid 10001. A root-owned bind mount must allow chown/chmod; when running as uid 10001, a restricted mount must already be writable by that uid. The entrypoint exits with a `/data`-specific error if it cannot proceed. For read-only or ownership-restricted mounts, make the host directory writable and owned by uid/gid 10001, or use a writable mount that permits the root initialization.
+
 `LIBRA_IMAGE=chakyiu/libra:<tag> docker compose pull && LIBRA_IMAGE=chakyiu/libra:<tag> docker compose up --no-build`
 pins a version other than the one in `docker-compose.yml`.
 
@@ -239,13 +241,15 @@ services:
       - microsandbox-data:/home/libra/.microsandbox   # cached images survive restarts
 ```
 
-The container runs as the unprivileged `libra` user (uid 10001), and `msb` runs as that
-user too — microsandbox itself needs no root. Coming from an older root-running image, the
-named volumes stay `root`-owned, so hand them over once:
+The server and `msb` run as the unprivileged `libra` user (uid 10001) — microsandbox itself
+needs no root. Coming from an older root-running image, the microsandbox cache volume stays
+`root`-owned, so hand it over once:
 
 ```sh
-docker compose run --rm --user 0 --entrypoint sh libra -c 'chown -R 10001:10001 /data /home/libra/.microsandbox'
+docker compose run --rm --user 0 --entrypoint sh libra -c 'chown -R 10001:10001 /home/libra/.microsandbox'
 ```
+
+The `/data` volume is prepared automatically by the container entrypoint.
 
 What `msb` does need is read/write access to
 `/dev/kvm`, which is usually `root:kvm` mode `0660`: pass the group through as well, or `msb`
