@@ -37,7 +37,7 @@ impl Event {
 }
 
 use crate::cache::Cache;
-use crate::config::SettingsHandle;
+use crate::config::{Config, SettingsHandle};
 use crate::db::Db;
 use crate::pipeline::Pipeline;
 use crate::search::SearchHub;
@@ -61,17 +61,7 @@ pub struct App {
 impl App {
     pub fn new(settings: SettingsHandle, db: Arc<Db>, cache: Cache) -> anyhow::Result<Self> {
         let cfg = settings.get();
-        // Stall timeout, not a cap on how long an answer may stream. Reqwest's
-        // total timeout runs until the body ends, so a 120s deadline was aborting
-        // long answers as "error decoding response body".
-        let stall = std::time::Duration::from_secs(cfg.request_timeout_secs.max(1));
-        let http = Client::builder()
-            .user_agent("libra/0.1 (+self-hosted answer engine)")
-            .connect_timeout(stall.min(std::time::Duration::from_secs(30)))
-            .read_timeout(stall)
-            .tcp_nodelay(true)
-            .pool_max_idle_per_host(16)
-            .build()?;
+        let http = http_client(&cfg)?;
         let search = Arc::new(SearchHub::new(&http, settings.clone(), cache.clone()));
         let widgets = Arc::new(Registry::new(&http, settings.clone(), cache.clone()));
         let uploads = Arc::new(UploadStore::new(
@@ -100,4 +90,41 @@ impl App {
             pipeline,
         })
     }
+}
+
+/// The shared outbound client: every provider, model, embedding and image call uses it,
+/// so a LAN provider behind its own CA is configured once here.
+fn http_client(cfg: &Config) -> anyhow::Result<Client> {
+    // Stall timeout, not a cap on how long an answer may stream. Reqwest's total timeout
+    // runs until the body ends, so a 120s deadline was aborting long answers as
+    // "error decoding response body".
+    let stall = std::time::Duration::from_secs(cfg.request_timeout_secs.max(1));
+    let mut builder = Client::builder()
+        .user_agent("libra/0.1 (+self-hosted answer engine)")
+        .connect_timeout(stall.min(std::time::Duration::from_secs(30)))
+        .read_timeout(stall)
+        .tcp_nodelay(true)
+        .pool_max_idle_per_host(16);
+    // A provider on a LAN host with its own CA fails the handshake otherwise: rustls
+    // reports UnknownIssuer and the call never reaches the server. Trust the bundle, or —
+    // for a self-signed host you own — skip verification when explicitly asked.
+    if let Some(path) = &cfg.tls_ca_file {
+        let pem = std::fs::read(path)
+            .map_err(|e| anyhow::anyhow!("LIBRA_TLS_CA_FILE {}: {e}", path.display()))?;
+        let certs = reqwest::Certificate::from_pem_bundle(&pem)
+            .map_err(|e| anyhow::anyhow!("LIBRA_TLS_CA_FILE {}: {e}", path.display()))?;
+        if certs.is_empty() {
+            anyhow::bail!(
+                "LIBRA_TLS_CA_FILE {}: no certificate in the file",
+                path.display()
+            );
+        }
+        for cert in certs {
+            builder = builder.add_root_certificate(cert);
+        }
+    }
+    if cfg.tls_skip_verify {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    Ok(builder.build()?)
 }

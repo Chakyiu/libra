@@ -284,6 +284,18 @@ Settings are held in an `Arc<RwLock<Config>>`; a change swaps the `Arc` and each
 keeps the snapshot it started with. No subsystem rebuild, no restart. Model providers and the models
 chosen from them are the exception — those come only from Settings, never from env vars.
 
+A provider on a LAN host with its own CA or a self-signed certificate needs that trust at the client,
+or every call fails the handshake before it reaches the server. Both are env-only and read at startup:
+
+```bash
+# LIBRA_TLS_CA_FILE=/etc/libra/lan-ca.pem   # extra roots for a provider behind a private CA
+# LIBRA_TLS_SKIP_VERIFY=1                   # accept any certificate, for a self-signed host you own
+```
+
+`LIBRA_TLS_CA_FILE` wants the CA's PEM bundle, with verification still on. `LIBRA_TLS_SKIP_VERIFY`
+is the blunt one: it covers the whole outbound client (providers, embeddings, image generation), not
+just the one host, so prefer the CA file wherever the server presents an ordinary leaf certificate.
+
 Search fallback order is per kind (`WEB_SEARCH_ORDER`, `NEWS_SEARCH_ORDER`, `IMAGE_SEARCH_ORDER`,
 `VIDEO_SEARCH_ORDER`). The Automator's own settings — `MSB_BIN`, `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_CHAT_ID`, `TELEGRAM_API_URL` — are in [.env.example](.env.example) and explained under
@@ -432,6 +444,7 @@ first window; the last URL is offered on the next start. Build with
 - **Command jobs only run where `msb` does.** microsandbox is beta: it needs KVM on Linux and Apple Silicon on macOS, so a container running Libra wants `/dev/kvm` passed through to schedule anything. Without the binary a job records an error run that says so, rather than pretending it ran.
 - **A schedule comes back in the scheduler's own form.** You type `0 8 * * 1-5`; it is stored as `0 0 8 * * 2-6` — six fields, and weekdays counted the way the cron crate counts them, 1 = Sunday — and the job form shows the stored string. It round-trips, so editing a job never shifts the day again, but it is not what you typed.
 - **A prompt run reports failure at its deadline while the answer carries on.** The run is recorded as failed with what had arrived by then, and the thread finishes in the background, so a later look can show a complete answer under a failed run. That is deliberate: the alternative was losing the thread entirely.
+- **A self-signed certificate can still refuse verification even when you trust it.** If the server presents a certificate marked `CA:TRUE` as its own leaf — some small gateways generate one that way — rustls rejects the connection with `CaUsedAsEndEntity` before any CA bundle is consulted. Reissue the server a normal leaf certificate from a CA (then `LIBRA_TLS_CA_FILE` works), or set `LIBRA_TLS_SKIP_VERIFY=1` for that host.
 - **The scheduler is a 20-second sweep**, not a realtime timer: a job fires within a tick of its minute. A restart delays one — it runs on the next tick after the server is back, but several missed occurrences collapse into a single run.
 
 ## Acknowledgements
